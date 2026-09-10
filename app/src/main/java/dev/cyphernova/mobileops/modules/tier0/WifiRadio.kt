@@ -15,6 +15,15 @@ data class ApObservation(
 ) {
     val isHidden: Boolean get() = ssid.isBlank()
     val displaySsid: String get() = if (isHidden) "<hidden>" else ssid
+    /**
+     * 0 dBm would be a full milliwatt arriving at the antenna, which does not happen. The
+     * platform uses it as "withheld", so it is treated as absent rather than reported as a
+     * reading.
+     */
+    val hasRssi: Boolean get() = rssiDbm != 0
+
+    val rssiLabel: String get() = if (hasRssi) "$rssiDbm dBm" else "signal withheld"
+
     val band: String
         get() = when (frequencyMhz) {
             in 2401..2495 -> "2.4 GHz"
@@ -60,13 +69,31 @@ class WifiRadio(context: Context) {
     @Suppress("DEPRECATION")
     fun latestResults(): List<ApObservation> =
         runCatching {
+            // The AP we are associated with reports a live RSSI through WifiInfo even when the
+            // scan entry does not, so it can be repaired where it matters most.
+            val connected = runCatching { wifiManager.connectionInfo }.getOrNull()
+            val connectedBssid = connected?.bssid
+            val connectedRssi = connected?.rssi ?: 0
+
             wifiManager.scanResults.map { result: ScanResult ->
+                val level = result.level
+                val repaired = if (
+                    level == 0 &&
+                    connectedRssi != 0 &&
+                    connectedBssid != null &&
+                    connectedBssid.equals(result.BSSID, ignoreCase = true)
+                ) {
+                    connectedRssi
+                } else {
+                    level
+                }
+
                 ApObservation(
                     ssid = result.SSID.orEmpty(),
                     bssid = result.BSSID.orEmpty(),
                     capabilities = result.capabilities.orEmpty(),
                     frequencyMhz = result.frequency,
-                    rssiDbm = result.level,
+                    rssiDbm = repaired,
                 )
             }
         }.getOrDefault(emptyList())

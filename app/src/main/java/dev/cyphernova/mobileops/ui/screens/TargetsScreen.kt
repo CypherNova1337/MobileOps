@@ -152,7 +152,7 @@ private fun NetworkRow(network: Target.Network, selected: Boolean, onToggle: () 
     SelectableRow(selected = selected, onToggle = onToggle) {
         Text(network.label, fontWeight = FontWeight.SemiBold)
         Text(
-            "${profile.encryption.label} · ${observation.band} ch ${observation.channel} · ${network.rssiDbm} dBm",
+            "${profile.encryption.label} · ${observation.band} ch ${observation.channel} · ${observation.rssiLabel}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

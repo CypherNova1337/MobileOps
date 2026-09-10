@@ -117,7 +117,7 @@ class RogueApModule : PentestModule {
 
     private fun bssidBreakdown(profiles: Map<ApObservation, SecurityProfile>): Map<String, String> =
         profiles.entries.associate { (ap, profile) ->
-            ap.bssid to "${profile.encryption.label}, ch ${ap.channel}, ${ap.rssiDbm} dBm, vendor ${ap.oui}"
+            ap.bssid to "${profile.encryption.label}, ch ${ap.channel}, ${ap.rssiLabel}, vendor ${ap.oui}"
         }
 
     private companion object {

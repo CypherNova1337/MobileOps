@@ -70,7 +70,7 @@ class WifiSurveyModule : PentestModule {
                 "bssid" to ap.bssid,
                 "band" to ap.band,
                 "channel" to ap.channel.toString(),
-                "rssi_dbm" to ap.rssiDbm.toString(),
+                "rssi_dbm" to if (ap.hasRssi) ap.rssiDbm.toString() else "withheld",
                 "encryption" to profile.encryption.label,
                 "wps" to profile.wpsEnabled.toString(),
                 "pmf" to profile.managementFrameProtection.toString(),
@@ -84,7 +84,7 @@ class WifiSurveyModule : PentestModule {
                     severity = Severity.INFO,
                     title = "AP observed: ${ap.displaySsid}",
                     subject = ap.bssid,
-                    detail = "${profile.encryption.label} on ${ap.band} channel ${ap.channel} at ${ap.rssiDbm} dBm.",
+                    detail = "${profile.encryption.label} on ${ap.band} channel ${ap.channel}, ${ap.rssiLabel}.",
                     data = facts,
                 ),
             )

@@ -16,10 +16,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Nearby WiFi devices replaces the location gate for scanning on Android 13+. -->
+    <!--
+      Nearby WiFi devices replaces the location gate for scanning on Android 13+.
+
+      Deliberately NOT flagged neverForLocation: that flag asserts the app cannot derive location
+      from WiFi data, and the platform honours it by redacting the fields that would allow it —
+      RSSI among them, which comes back as 0. A signal survey needs real RSSI, so the assertion
+      would be false as well as destructive.
+    -->
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
-        android:usesPermissionFlags="neverForLocation"
         tools:targetApi="tiramisu" />
 
     <uses-feature

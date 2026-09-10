@@ -75,12 +75,19 @@ class HostDiscoveryModule : PentestModule {
         }
 
         live.forEach { host ->
+            // Two addresses on every sweep are already known; saying so saves the reader working
+            // out why their own handset is in the results.
+            val role = when (host.address) {
+                position.localAddress -> " (this device)"
+                position.gateway -> " (gateway)"
+                else -> ""
+            }
             emit(
                 Finding(
                     moduleId = id,
                     observedAtEpochMs = System.currentTimeMillis(),
                     severity = Severity.INFO,
-                    title = "Live host ${host.address}",
+                    title = "Live host ${host.address}$role",
                     subject = host.address,
                     detail = "Responded via ${host.method}." +
                         (host.hostname?.let { " Reverse DNS: $it." } ?: "") +
@@ -90,6 +97,7 @@ class HostDiscoveryModule : PentestModule {
                         "method" to host.method,
                         "hostname" to host.hostname.orEmpty(),
                         "open_ports" to host.openPorts.joinToString(),
+                        "role" to role.trim().removeSurrounding("(", ")"),
                     ),
                 ),
             )

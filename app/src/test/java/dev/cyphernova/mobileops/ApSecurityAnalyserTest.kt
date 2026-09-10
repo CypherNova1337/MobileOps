@@ -93,3 +93,33 @@ class ApSecurityAnalyserTest {
         assertTrue(profile.issues.any { it.severity == Severity.INFO && it.title.contains("Hidden") })
     }
 }
+
+class RssiReportingTest {
+
+    private fun ap(rssi: Int) = ApObservation(
+        ssid = "Test",
+        bssid = "AA:BB:CC:DD:EE:FF",
+        capabilities = "[WPA2-PSK-CCMP][ESS]",
+        frequencyMhz = 2457,
+        rssiDbm = rssi,
+    )
+
+    @Test
+    fun `a real reading is reported in dBm`() {
+        assertTrue(ap(-55).hasRssi)
+        assertEquals("-55 dBm", ap(-55).rssiLabel)
+    }
+
+    @Test
+    fun `zero is treated as withheld rather than a reading`() {
+        // 0 dBm is a full milliwatt at the antenna. The platform uses it to mean "redacted",
+        // and reporting it as a signal level is how a survey ends up lying.
+        assertFalse(ap(0).hasRssi)
+        assertEquals("signal withheld", ap(0).rssiLabel)
+    }
+
+    @Test
+    fun `channel 10 resolves from its frequency`() {
+        assertEquals(10, ap(-55).channel)
+    }
+}
