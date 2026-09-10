@@ -52,6 +52,22 @@ Plugging one in is the easy part. Using it needs, in order:
 
 The Device tab lists what is detected and what each adapter is still missing.
 
+## Raw beacon elements
+
+Android summarises an AP's security into a string like `[WPA2-PSK-CCMP][WPS]`, which is enough to
+say WPS is enabled and nothing more. Since API 30 the elements underneath are readable without
+root, and they carry what actually decides whether a weakness is exploitable:
+
+- **WPS AP Setup Locked** — an unlocked PIN is an attack path; a locked one is a note. This single
+  bit is the difference, and the capability string never carries it.
+- **The real AKM and cipher lists** — SAE and PSK together is a confirmed downgrade path, not an
+  inference from a summary string.
+- **802.11w required vs merely capable** — an AP that supports management frame protection without
+  insisting on it leaves any client that declines fully exposed.
+- **Manufacturer, model and serial** from the WPS element — enough to look up firmware-specific
+  vulnerabilities before touching the network.
+- Whether an AP is still in its unconfigured out-of-box state.
+
 ## Rootless packet capture
 
 The single most useful thing a stock Android device can do, and it needs no root at all.
@@ -162,6 +178,8 @@ halfway still parses up to the last complete record) and exports as a Markdown r
 - `t0.tls.intercept` — arms TLS interception and manages the local CA. Run again to disarm.
 
 **Tier 0 — active**
+- `t0.net.services` — resolves names and services over NetBIOS, mDNS and SSDP: the announcements
+  devices already make. Fills in the names reverse DNS cannot.
 - `t0.net.discovery` — subnet sweep via ICMP echo plus TCP connect probes. Caps at a /22, because
   a /16 sweep is 65k probes and a flat battery.
 - `t0.net.portscan` — connect-scans a well-known port set on the selected hosts, with banner
@@ -192,7 +210,7 @@ Requires JDK 17+ and the Android SDK (compileSdk 35, build-tools 35.0.0). Point 
 
 ```
 gradle assembleDebug          # → app/build/outputs/apk/debug/app-debug.apk
-gradle testDebugUnitTest      # 74 tests: packet codec, TLS/SNI, CA, CIDR, targets, identity
+gradle testDebugUnitTest      # 102 tests: packet codec, beacon IEs, TLS/SNI, CA, name codecs
 ```
 
 `minSdk` is 26, `targetSdk` 35.
@@ -203,6 +221,8 @@ gradle testDebugUnitTest      # 74 tests: packet codec, TLS/SNI, CA, CIDR, targe
 core/
   capability/   Tier, DeviceCapabilities, CapabilityProbe — what this device can actually do
   capture/      Packets, TcpRelay, UdpRelay, PcapWriter, CaptureVpnService — rootless capture
+  beacon/       BeaconElements — raw 802.11 information elements
+  discovery/    Nbns, Mdns, Ssdp — name and service announcement codecs
   identity/     DeviceProfile, IdentityProbe — what this device presents to a network
   net/          Cidr4 — IPv4 address arithmetic
   tls/          CertificateAuthority, SniParser, MitmServer, HttpPeek — interception
@@ -225,13 +245,14 @@ which is the same question as "would the far end accept this packet".
 
 ## Roadmap
 
-- TLS interception on the capture path (local CA, per-flow MITM) for cleartext inspection
+Ordered for an unrooted device, since that is the target:
+
 - Flow summary and protocol breakdown in-app, rather than exporting to Wireshark for everything
 - IPv6 relay — the TUN is currently IPv4-only
-- ICMP relay (needs a raw socket, so Tier 1)
-- mDNS / SSDP / NBNS service enumeration
-- BLE reconnaissance
+- HTTP security-header auditing on intercepted flows
 - Captive portal and DNS-leak checks
+- BLE reconnaissance
+- ICMP relay (needs a raw socket, so Tier 1)
 
 ## Authorised use
 

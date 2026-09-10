@@ -89,7 +89,71 @@ class WifiSurveyModule : PentestModule {
                 ),
             )
 
-            profile.issues.forEach { issue ->
+            // Elements carry what the capability string cannot: whether WPS is locked, the exact
+            // AKM list, whether 802.11w is required or merely offered.
+            val beacon = BeaconAudit.profileOf(ap)
+            val beaconIssues = beacon?.let(BeaconAudit::issues).orEmpty()
+
+            if (beacon != null) {
+                emit(
+                    Finding(
+                        moduleId = id,
+                        observedAtEpochMs = System.currentTimeMillis(),
+                        severity = Severity.INFO,
+                        title = "Beacon elements: ${ap.displaySsid}",
+                        subject = ap.bssid,
+                        detail = buildString {
+                            append("Radio: ${BeaconAudit.radioSummary(beacon)}. ")
+                            beacon.rsn?.let { rsn ->
+                                append("RSN: AKM ${rsn.akmSuites.joinToString().ifBlank { "none" }}, ")
+                                append("pairwise ${rsn.pairwiseCiphers.joinToString().ifBlank { "none" }}, ")
+                                append("group ${rsn.groupCipher}, ")
+                                append(
+                                    when {
+                                        rsn.managementFrameProtectionRequired -> "802.11w required. "
+                                        rsn.managementFrameProtectionCapable -> "802.11w optional. "
+                                        else -> "no 802.11w. "
+                                    },
+                                )
+                            }
+                            beacon.wps?.let { wps ->
+                                append("WPS ${wps.version ?: "?"}, ")
+                                append(
+                                    when (wps.setupLocked) {
+                                        true -> "PIN locked. "
+                                        false -> "PIN unlocked. "
+                                        null -> "lock state not advertised. "
+                                    },
+                                )
+                                wps.deviceName?.let { append("Device '$it'. ") }
+                            }
+                        },
+                        data = buildMap {
+                            put("elements", beacon.elementIds.joinToString())
+                            put("vendor_ouis", beacon.vendorOuis.joinToString())
+                            beacon.rsn?.let {
+                                put("akm_suites", it.akmSuites.joinToString())
+                                put("pairwise_ciphers", it.pairwiseCiphers.joinToString())
+                                put("group_cipher", it.groupCipher)
+                                put("mfp_required", it.managementFrameProtectionRequired.toString())
+                                put("mfp_capable", it.managementFrameProtectionCapable.toString())
+                            }
+                            beacon.wps?.let {
+                                put("wps_version", it.version.orEmpty())
+                                put("wps_locked", it.setupLocked?.toString().orEmpty())
+                                put("wps_configured", it.configured?.toString().orEmpty())
+                                put("wps_manufacturer", it.manufacturer.orEmpty())
+                                put("wps_model", it.modelName.orEmpty())
+                                put("wps_model_number", it.modelNumber.orEmpty())
+                                put("wps_serial", it.serialNumber.orEmpty())
+                                put("wps_device_name", it.deviceName.orEmpty())
+                            }
+                        },
+                    ),
+                )
+            }
+
+            (profile.issues + beaconIssues).forEach { issue ->
                 flagged++
                 emit(
                     Finding(

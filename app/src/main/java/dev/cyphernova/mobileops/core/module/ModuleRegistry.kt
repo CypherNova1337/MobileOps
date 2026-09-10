@@ -4,6 +4,7 @@ import dev.cyphernova.mobileops.modules.tier0.HostDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.IdentityAuditModule
 import dev.cyphernova.mobileops.modules.tier0.PortScanModule
 import dev.cyphernova.mobileops.modules.tier0.RogueApModule
+import dev.cyphernova.mobileops.modules.tier0.ServiceDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.TlsAuditModule
 import dev.cyphernova.mobileops.modules.tier0.TlsInterceptModule
 import dev.cyphernova.mobileops.modules.tier0.VpnCaptureModule
@@ -22,6 +23,7 @@ object ModuleRegistry {
         WifiSurveyModule(),
         RogueApModule(),
         HostDiscoveryModule(),
+        ServiceDiscoveryModule(),
         PortScanModule(),
         TlsAuditModule(),
         VpnCaptureModule(),

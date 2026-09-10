@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
+import android.os.Build
 
 /** A scan result flattened into the fields the modules actually reason about. */
 data class ApObservation(
@@ -12,6 +13,8 @@ data class ApObservation(
     val capabilities: String,
     val frequencyMhz: Int,
     val rssiDbm: Int,
+    /** Raw beacon elements as (id, payload); empty below API 30, where they are unavailable. */
+    val informationElements: List<Pair<Int, ByteArray>> = emptyList(),
 ) {
     val isHidden: Boolean get() = ssid.isBlank()
     val displaySsid: String get() = if (isHidden) "<hidden>" else ssid
@@ -58,6 +61,25 @@ class WifiRadio(context: Context) {
 
     val isWifiEnabled: Boolean get() = wifiManager.isWifiEnabled
 
+    /** True where the platform will hand over raw beacon elements rather than a summary string. */
+    val elementsAvailable: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+
+    /**
+     * Raw information elements, added to [ScanResult] in API 30. Everything below that is stuck
+     * with the summarised capability string, so the richer findings simply do not appear.
+     */
+    private fun elementsOf(result: ScanResult): List<Pair<Int, ByteArray>> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
+        return runCatching {
+            result.informationElements.orEmpty().mapNotNull { element ->
+                val buffer = element.bytes ?: return@mapNotNull null
+                val payload = ByteArray(buffer.remaining())
+                buffer.duplicate().get(payload)
+                element.id to payload
+            }
+        }.getOrDefault(emptyList())
+    }
+
     /**
      * Asks the platform for a fresh scan. Returns false when the request was throttled — the
      * caller should fall back to [latestResults] rather than treat it as a failure.
@@ -94,6 +116,7 @@ class WifiRadio(context: Context) {
                     capabilities = result.capabilities.orEmpty(),
                     frequencyMhz = result.frequency,
                     rssiDbm = repaired,
+                    informationElements = elementsOf(result),
                 )
             }
         }.getOrDefault(emptyList())
