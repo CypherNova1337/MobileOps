@@ -11,6 +11,8 @@ import dev.cyphernova.mobileops.core.evidence.EvidenceStore
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.identity.DeviceProfile
 import dev.cyphernova.mobileops.core.identity.DeviceProfiles
+import dev.cyphernova.mobileops.core.evidence.Severity
+import dev.cyphernova.mobileops.core.tls.InterceptController
 import dev.cyphernova.mobileops.core.module.Blocker
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.ModuleRegistry
@@ -101,11 +103,48 @@ class MobileOpsViewModel(application: Application) : AndroidViewModel(applicatio
         TargetSelection((networks + hosts).filter { it.key in keys })
     }.stateIn(viewModelScope, SharingStarted.Eagerly, TargetSelection())
 
+    val interceptEnabled: StateFlow<Boolean> = InterceptController.enabled
+    val interceptedRequests = InterceptController.requests
+    val interceptCounters = InterceptController.counters
+
     init {
         viewModelScope.launch {
             evidenceStore.load()
             refreshCapabilities()
             scanNetworks()
+        }
+        // Intercepted requests arrive continuously while a capture runs; mirroring them into the
+        // evidence log here keeps a single writer rather than handing the service a second one.
+        viewModelScope.launch {
+            var recorded = 0
+            InterceptController.requests.collect { requests ->
+                if (requests.size < recorded) recorded = 0 // the list was cleared
+                requests.drop(recorded).forEach { request ->
+                    evidenceStore.record(
+                        Finding(
+                            moduleId = "t0.tls.intercept",
+                            observedAtEpochMs = request.observedAtEpochMs,
+                            severity = if (request.secrets.isEmpty()) Severity.INFO else Severity.MEDIUM,
+                            title = "${request.method} ${request.host}",
+                            subject = request.url,
+                            detail = if (request.secrets.isEmpty()) {
+                                "Read in the clear inside the intercepted flow."
+                            } else {
+                                "Read in the clear. " + request.secrets.joinToString(" ") {
+                                    "${it.kind} (${it.where}): ${it.detail}."
+                                }
+                            },
+                            data = mapOf(
+                                "host" to request.host,
+                                "method" to request.method,
+                                "path" to request.path,
+                                "secret_count" to request.secrets.size.toString(),
+                            ),
+                        ),
+                    )
+                }
+                recorded = requests.size
+            }
         }
     }
 
@@ -205,6 +244,11 @@ class MobileOpsViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun renderReport(): String = evidenceStore.renderReport()
+
+    /** The CA certificate file, once interception has generated one. */
+    fun caCertificateFile(): File? =
+        File(File(getApplication<Application>().filesDir, "tls"), "MobileOps-CA.pem")
+            .takeIf { it.exists() }
 
     private companion object {
         const val SCAN_SETTLE_MS = 2_500L

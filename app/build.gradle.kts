@@ -49,6 +49,12 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // The three BouncyCastle jars each ship the same multi-release OSGi metadata, which
+            // is irrelevant on Android and only collides at merge time.
+            excludes += "/META-INF/versions/**/OSGI-INF/MANIFEST.MF"
+            excludes += "/META-INF/*.SF"
+            excludes += "/META-INF/*.DSA"
+            excludes += "/META-INF/*.RSA"
         }
     }
 }
@@ -66,6 +72,9 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    // Android has no certificate-generation API, so the CA that signs intercepted flows needs one.
+    implementation(libs.bouncycastle.prov)
+    implementation(libs.bouncycastle.pkix)
     debugImplementation(libs.androidx.ui.tooling)
 
     testImplementation(libs.junit)

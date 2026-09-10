@@ -6,6 +6,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import dev.cyphernova.mobileops.core.tls.InterceptRegistry
+import dev.cyphernova.mobileops.core.tls.OriginalDestination
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.ByteBuffer
@@ -31,6 +33,8 @@ class TcpRelay(
     private val protect: (Socket) -> Boolean,
     private val emit: (ByteArray) -> Unit,
     private val stats: CaptureStats = CaptureStats(),
+    /** Loopback port of the TLS interceptor, or -1 when interception is off. */
+    private val interceptPort: () -> Int = { -1 },
 ) {
 
     private enum class State { CONNECTING, ESTABLISHED, CLOSING }
@@ -116,10 +120,24 @@ class TcpRelay(
                 return@launch
             }
 
+            val destinationIp = Packets.ipToString(key.destinationIp)
+            val mitm = interceptPort()
+            val intercept = mitm > 0 && key.destinationPort in INTERCEPTED_PORTS
+
             val connected = runCatching {
-                channel.connect(
-                    InetSocketAddress(Packets.ipToString(key.destinationIp), key.destinationPort),
-                )
+                if (intercept) {
+                    // Bind before connecting so the local port exists, and register the real
+                    // destination against it first. The interceptor looks the destination up by
+                    // that port, so registering ahead of connect removes the race entirely.
+                    channel.bind(InetSocketAddress(0))
+                    InterceptRegistry.register(
+                        channel.socket().localPort,
+                        OriginalDestination(destinationIp, key.destinationPort),
+                    )
+                    channel.connect(InetSocketAddress(LOOPBACK, mitm))
+                } else {
+                    channel.connect(InetSocketAddress(destinationIp, key.destinationPort))
+                }
             }.getOrDefault(false)
 
             if (!connected) {
@@ -248,6 +266,10 @@ class TcpRelay(
 
     private companion object {
         const val SEGMENT_BYTES = 1400 // stays under a 1500-byte MTU once headers are added
+        const val LOOPBACK = "127.0.0.1"
+
+        /** Ports diverted to the interceptor when it is running. */
+        val INTERCEPTED_PORTS = setOf(443, 8443)
 
         /** Sequence numbers are 32-bit and wrap; every advance has to wrap with them. */
         fun seqAdd(sequence: Long, delta: Int): Long = (sequence + delta) and 0xFFFFFFFFL

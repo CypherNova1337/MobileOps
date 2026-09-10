@@ -79,6 +79,36 @@ address on the air is not the hardware address. It is stable per SSID, so it sti
 across sessions on the same network. And the device name goes out as the DHCP hostname, which
 lands in the lease table no matter what the MAC says — that is the identifier people forget.
 
+## TLS interception
+
+Turns the encrypted half of a capture into readable requests. A local CA is generated on the
+device, interception mints a certificate per hostname from the SNI in the ClientHello, and the
+plaintext is relayed between two TLS connections — one to the device, one to the real server.
+
+The device only accepts the substituted certificate if it trusts that CA, which is TLS working
+as designed rather than a limitation to route around. What that means in practice:
+
+| | Sees |
+| --- | --- |
+| CA not installed | Nothing. Every handshake is refused. |
+| CA installed as a **user** certificate | Browsers, and apps that opt into user CAs |
+| CA installed in the **system** store (root) | Everything except apps that pin |
+| Certificate-pinning apps | Nothing, at any tier, by design |
+
+The middle row is the one that surprises people: since Android 7, apps trust user-installed CAs
+only if their network security config opts in, and almost none do. So a user-installed CA is a
+browser-traffic tool. `t0.tls.intercept` reports the exact filename the system store keys on
+(`<subject hash>.0`) for the rooted case.
+
+The upstream leg verifies the real server properly, hostname included — an `SSLSocket` does not
+do that by default, and skipping it would hide a genuine attack on the path behind the
+interception being performed.
+
+Requests are logged with their method, host, path and any credential material **described but
+never recorded**: bearer tokens, Basic auth, session cookies, `X-Api-Key`-style headers, and
+credentials passed in query strings. An evidence file containing live credentials is its own
+incident.
+
 ## Targets
 
 Modules that act on a host take their targets from the Targets tab: pick a WiFi network from a
@@ -105,6 +135,7 @@ halfway still parses up to the last complete record) and exports as a Markdown r
 - `t0.identity.audit` — reports what the network can learn about this handset: DHCP hostname,
   MAC randomisation behaviour, and what the platform will not let an app read or change.
 - `t0.capture.vpn` — rootless traffic capture to pcap, as above. Run it again to stop.
+- `t0.tls.intercept` — arms TLS interception and manages the local CA. Run again to disarm.
 
 **Tier 0 — active**
 - `t0.net.discovery` — subnet sweep via ICMP echo plus TCP connect probes. Caps at a /22, because
@@ -137,7 +168,7 @@ Requires JDK 17+ and the Android SDK (compileSdk 35, build-tools 35.0.0). Point 
 
 ```
 gradle assembleDebug          # → app/build/outputs/apk/debug/app-debug.apk
-gradle testDebugUnitTest      # 38 tests: packet codec, CIDR, targets, AP analysis, identity
+gradle testDebugUnitTest      # 74 tests: packet codec, TLS/SNI, CA, CIDR, targets, identity
 ```
 
 `minSdk` is 26, `targetSdk` 35.
@@ -150,6 +181,7 @@ core/
   capture/      Packets, TcpRelay, UdpRelay, PcapWriter, CaptureVpnService — rootless capture
   identity/     DeviceProfile, IdentityProbe — what this device presents to a network
   net/          Cidr4 — IPv4 address arithmetic
+  tls/          CertificateAuthority, SniParser, MitmServer, HttpPeek — interception
   target/       Target, TargetSelection — what modules are pointed at
   module/       PentestModule, ModuleRunner, ModuleRegistry — the single door every run goes through
   evidence/     Finding, EvidenceStore — append-only log and Markdown report

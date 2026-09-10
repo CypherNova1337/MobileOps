@@ -69,6 +69,17 @@
                 android:value="Packet capture for network security assessment" />
         </service>
 
+        <!-- Hands the CA certificate to Android's installer as a content URI. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

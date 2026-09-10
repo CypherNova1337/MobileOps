@@ -1,6 +1,7 @@
 package dev.cyphernova.mobileops.ui.screens
 
 import android.content.Intent
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +53,25 @@ fun EvidenceScreen(viewModel: MobileOpsViewModel) {
                 ) { Text("Export report") }
 
                 OutlinedButton(onClick = viewModel::clearEvidence) { Text("Clear log") }
+
+                // Only appears once interception has generated a CA to install.
+                viewModel.caCertificateFile()?.let { certificate ->
+                    OutlinedButton(
+                        onClick = {
+                            val uri = FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.files",
+                                certificate,
+                            )
+                            val share = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/x-pem-file"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(share, "Export CA certificate"))
+                        },
+                    ) { Text("Export CA") }
+                }
             }
         }
 

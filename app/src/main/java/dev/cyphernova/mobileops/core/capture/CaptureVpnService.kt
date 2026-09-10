@@ -11,6 +11,10 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import dev.cyphernova.mobileops.MainActivity
 import dev.cyphernova.mobileops.R
+import dev.cyphernova.mobileops.core.tls.CertificateAuthority
+import dev.cyphernova.mobileops.core.tls.InterceptController
+import dev.cyphernova.mobileops.core.tls.InterceptStats
+import dev.cyphernova.mobileops.core.tls.MitmServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -119,7 +123,33 @@ class CaptureVpnService : VpnService() {
         }
 
         val stats = CaptureStats()
-        val tcpRelay = TcpRelay(serviceScope, ::protect, emit, stats)
+        val interceptStats = InterceptStats()
+
+        // Interception is armed before the capture starts, so the listener is up before the
+        // first flow arrives and no connection is diverted to a port nothing is listening on.
+        val mitm: MitmServer? = if (InterceptController.isEnabled) {
+            val authority = CertificateAuthority(File(filesDir, "tls"))
+            runCatching {
+                authority.initialise()
+                MitmServer(
+                    scope = serviceScope,
+                    authority = authority,
+                    protect = ::protect,
+                    stats = interceptStats,
+                    onExchange = InterceptController::record,
+                ).also { it.start() }
+            }.getOrNull()
+        } else {
+            null
+        }
+
+        val tcpRelay = TcpRelay(
+            serviceScope,
+            ::protect,
+            emit,
+            stats,
+            interceptPort = { mitm?.port ?: -1 },
+        )
         val udpRelay = UdpRelay(serviceScope, ::protect, emit, stats)
 
         // Status ticker: keeps the UI's counters live and reaps idle UDP flows.
@@ -133,6 +163,7 @@ class CaptureVpnService : VpnService() {
                     udpFlows = udpRelay.activeFlows,
                     stats = stats,
                 )
+                InterceptController.publish(interceptStats.snapshot())
                 delay(STATUS_INTERVAL_MS)
             }
         }
@@ -167,6 +198,7 @@ class CaptureVpnService : VpnService() {
         } catch (_: Exception) {
             // Read fails when the descriptor closes during teardown; that is the normal exit.
         } finally {
+            mitm?.stop()
             tcpRelay.closeAll()
             udpRelay.closeAll()
             runCatching { input.close() }
