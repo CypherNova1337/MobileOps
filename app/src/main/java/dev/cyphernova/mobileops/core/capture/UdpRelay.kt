@@ -21,6 +21,7 @@ class UdpRelay(
     private val scope: CoroutineScope,
     private val protect: (DatagramSocket) -> Boolean,
     private val emit: (ByteArray) -> Unit,
+    private val stats: CaptureStats = CaptureStats(),
 ) {
 
     private class Flow(val channel: DatagramChannel, val job: Job) {
@@ -41,8 +42,10 @@ class UdpRelay(
         flow.lastActiveMs = System.currentTimeMillis()
 
         scope.launch(Dispatchers.IO) {
-            runCatching { flow.channel.write(ByteBuffer.wrap(datagram.payload)) }
-                .onFailure { close(key) }
+            runCatching {
+                flow.channel.write(ByteBuffer.wrap(datagram.payload))
+                stats.udpBytesToServer.addAndGet(datagram.payload.size.toLong())
+            }.onFailure { close(key) }
         }
     }
 
@@ -50,6 +53,7 @@ class UdpRelay(
         val channel = runCatching { DatagramChannel.open() }.getOrNull() ?: return null
 
         if (!protect(channel.socket())) {
+            stats.udpProtectFailed.incrementAndGet()
             runCatching { channel.close() }
             return null
         }
@@ -77,6 +81,7 @@ class UdpRelay(
                     buffer.flip()
                     buffer.get(it)
                 }
+                stats.udpBytesToDevice.addAndGet(read.toLong())
                 // Reply travels back the other way: their port becomes the source.
                 emit(
                     Packets.buildUdp(
@@ -92,6 +97,7 @@ class UdpRelay(
             close(key)
         }
 
+        stats.udpFlowsOpened.incrementAndGet()
         val flow = Flow(channel, job)
         // Another packet for the same flow may have raced us here; keep whichever landed first.
         val existing = flows.putIfAbsent(key, flow)

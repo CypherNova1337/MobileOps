@@ -118,8 +118,9 @@ class CaptureVpnService : VpnService() {
             }
         }
 
-        val tcpRelay = TcpRelay(serviceScope, ::protect, emit)
-        val udpRelay = UdpRelay(serviceScope, ::protect, emit)
+        val stats = CaptureStats()
+        val tcpRelay = TcpRelay(serviceScope, ::protect, emit, stats)
+        val udpRelay = UdpRelay(serviceScope, ::protect, emit, stats)
 
         // Status ticker: keeps the UI's counters live and reaps idle UDP flows.
         serviceScope.launch {
@@ -130,6 +131,7 @@ class CaptureVpnService : VpnService() {
                     bytes = pcapWriter.byteCount,
                     tcpFlows = tcpRelay.activeFlows,
                     udpFlows = udpRelay.activeFlows,
+                    stats = stats,
                 )
                 delay(STATUS_INTERVAL_MS)
             }
@@ -146,13 +148,20 @@ class CaptureVpnService : VpnService() {
 
                 pcapWriter.write(buffer.copyOf(read), read)
 
-                val packet = Packets.parseIp4(buffer, read) ?: continue
+                val packet = Packets.parseIp4(buffer, read)
+                if (packet == null) {
+                    // Almost always IPv6: the TUN is IPv4-only, so these are captured to the pcap
+                    // and then dropped. On an IPv6-first network that is most of the traffic, and
+                    // counting it is the only way to see that happening.
+                    stats.ipv6Dropped.incrementAndGet()
+                    continue
+                }
                 when (packet.protocol) {
                     PROTO_TCP -> Packets.parseTcp(packet)?.let { tcpRelay.handle(packet, it) }
                     PROTO_UDP -> Packets.parseUdp(packet)?.let { udpRelay.handle(packet, it) }
                     // ICMP and everything else is captured but not forwarded: relaying it needs
                     // a raw socket, which is Tier 1.
-                    else -> Unit
+                    else -> stats.otherProtocolDropped.incrementAndGet()
                 }
             }
         } catch (_: Exception) {

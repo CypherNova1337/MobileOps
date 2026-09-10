@@ -40,25 +40,31 @@ class VpnCaptureModule : PentestModule {
             val pcap = status.pcapPath?.let(::File)
             val duration = (System.currentTimeMillis() - status.startedAtEpochMs) / 1000
 
+            // A quiet capture is ambiguous — idle device, or every flow failing. The counters
+            // settle it, so the verdict rides on the finding rather than the packet count.
+            val healthy = status.diagnosis.startsWith("Relay healthy")
+
             emit(
                 Finding(
                     moduleId = id,
                     observedAtEpochMs = System.currentTimeMillis(),
-                    severity = Severity.INFO,
+                    severity = if (healthy) Severity.INFO else Severity.MEDIUM,
                     title = "Capture stopped — ${status.packets} packets",
                     subject = pcap?.name ?: "capture",
                     detail = "${status.packets} packets (${status.bytes / 1024} KiB) over ${duration}s " +
                         "written to ${pcap?.absolutePath ?: "the capture directory"}. " +
-                        "Open it in Wireshark; the link type is RAW.",
-                    data = mapOf(
-                        "path" to (status.pcapPath ?: ""),
-                        "packets" to status.packets.toString(),
-                        "bytes" to status.bytes.toString(),
-                        "duration_s" to duration.toString(),
-                    ),
+                        "Open it in Wireshark; the link type is RAW.\n\n" +
+                        "Relay: ${status.diagnosis}",
+                    data = buildMap {
+                        put("path", status.pcapPath ?: "")
+                        put("packets", status.packets.toString())
+                        put("bytes", status.bytes.toString())
+                        put("duration_s", duration.toString())
+                        status.counters.forEach { (key, value) -> put(key, value.toString()) }
+                    },
                 ),
             )
-            return ModuleOutcome.Completed("Capture stopped: ${status.packets} packets.")
+            return ModuleOutcome.Completed("${status.packets} packets. ${status.diagnosis}")
         }
 
         // The system consent dialog can only be raised from an Activity, so the UI handles it

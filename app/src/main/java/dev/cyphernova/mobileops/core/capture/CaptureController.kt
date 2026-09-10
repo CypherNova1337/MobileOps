@@ -14,6 +14,8 @@ data class CaptureStatus(
     val pcapPath: String? = null,
     val startedAtEpochMs: Long = 0,
     val error: String? = null,
+    val counters: Map<String, Long> = emptyMap(),
+    val diagnosis: String = "",
 )
 
 /**
@@ -36,12 +38,20 @@ object CaptureController {
         )
     }
 
-    internal fun update(packets: Long, bytes: Long, tcpFlows: Int, udpFlows: Int) {
+    internal fun update(
+        packets: Long,
+        bytes: Long,
+        tcpFlows: Int,
+        udpFlows: Int,
+        stats: CaptureStats,
+    ) {
         _status.value = _status.value.copy(
             packets = packets,
             bytes = bytes,
             tcpFlows = tcpFlows,
             udpFlows = udpFlows,
+            counters = stats.snapshot(),
+            diagnosis = stats.diagnose(),
         )
     }
 

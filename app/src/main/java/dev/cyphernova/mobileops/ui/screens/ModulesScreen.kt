@@ -79,6 +79,25 @@ private fun CaptureBanner(capture: dev.cyphernova.mobileops.core.capture.Capture
                     "${capture.tcpFlows} TCP / ${capture.udpFlows} UDP flows",
                 style = MaterialTheme.typography.bodySmall,
             )
+            val established = capture.counters["tcp_established"] ?: 0L
+            val syns = capture.counters["tcp_syn_seen"] ?: 0L
+            val v6 = capture.counters["ipv6_dropped"] ?: 0L
+            Text(
+                "TCP $established/$syns established · $v6 IPv6 dropped",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (capture.diagnosis.isNotBlank()) {
+                Text(
+                    capture.diagnosis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (capture.diagnosis.startsWith("Relay healthy")) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
             capture.pcapPath?.let {
                 Text(
                     it.substringAfterLast('/'),

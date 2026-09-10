@@ -30,6 +30,7 @@ class TcpRelay(
     private val scope: CoroutineScope,
     private val protect: (Socket) -> Boolean,
     private val emit: (ByteArray) -> Unit,
+    private val stats: CaptureStats = CaptureStats(),
 ) {
 
     private enum class State { CONNECTING, ESTABLISHED, CLOSING }
@@ -67,7 +68,10 @@ class TcpRelay(
         when {
             segment.isRst -> close(key)
 
-            segment.isSyn && existing == null -> open(key, segment)
+            segment.isSyn && existing == null -> {
+                stats.tcpSynSeen.incrementAndGet()
+                open(key, segment)
+            }
 
             existing == null -> {
                 // Mid-stream packet for a flow we know nothing about (we were started after the
@@ -86,6 +90,7 @@ class TcpRelay(
             segment.payload.isNotEmpty() -> {
                 existing.theirSequence = seqAdd(segment.sequence, segment.payload.size)
                 emit(ack(existing))
+                stats.tcpBytesToServer.addAndGet(segment.payload.size.toLong())
                 existing.outbound.trySend(segment.payload)
             }
         }
@@ -104,6 +109,7 @@ class TcpRelay(
             }.getOrNull()
 
             if (channel == null || !protect(channel.socket())) {
+                stats.tcpProtectFailed.incrementAndGet()
                 runCatching { channel?.close() }
                 emit(reset(key, syn))
                 connections.remove(key)
@@ -117,6 +123,7 @@ class TcpRelay(
             }.getOrDefault(false)
 
             if (!connected) {
+                stats.tcpConnectFailed.incrementAndGet()
                 runCatching { channel.close() }
                 emit(reset(key, syn))
                 connections.remove(key)
@@ -140,6 +147,7 @@ class TcpRelay(
             )
             connection.ourSequence = seqAdd(connection.ourSequence, 1)
             connection.state = State.ESTABLISHED
+            stats.tcpEstablished.incrementAndGet()
 
             connection.jobs += scope.launch(Dispatchers.IO) { pumpOutbound(connection, channel) }
             connection.jobs += scope.launch(Dispatchers.IO) { pumpInbound(connection, channel) }
@@ -185,6 +193,7 @@ class TcpRelay(
                 ),
             )
             connection.ourSequence = seqAdd(connection.ourSequence, read)
+            stats.tcpBytesToDevice.addAndGet(read.toLong())
         }
 
         // The far end hung up: pass the close through so the app sees a clean EOF.
