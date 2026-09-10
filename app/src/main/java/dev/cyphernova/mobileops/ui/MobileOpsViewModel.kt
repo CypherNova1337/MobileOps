@@ -9,6 +9,8 @@ import dev.cyphernova.mobileops.core.capture.CaptureController
 import dev.cyphernova.mobileops.core.capture.CaptureStatus
 import dev.cyphernova.mobileops.core.evidence.EvidenceStore
 import dev.cyphernova.mobileops.core.evidence.Finding
+import dev.cyphernova.mobileops.core.identity.DeviceProfile
+import dev.cyphernova.mobileops.core.identity.DeviceProfiles
 import dev.cyphernova.mobileops.core.module.Blocker
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.ModuleRegistry
@@ -65,6 +67,9 @@ class MobileOpsViewModel(application: Application) : AndroidViewModel(applicatio
 
     val findings: StateFlow<List<Finding>> = evidenceStore.findings
     val captureStatus: StateFlow<CaptureStatus> = CaptureController.status
+
+    private val _profile = MutableStateFlow(DeviceProfiles.PASSTHROUGH)
+    val profile: StateFlow<DeviceProfile> = _profile.asStateFlow()
 
     private val _vpnConsentNeeded = MutableStateFlow(false)
     val vpnConsentNeeded: StateFlow<Boolean> = _vpnConsentNeeded.asStateFlow()
@@ -171,10 +176,20 @@ class MobileOpsViewModel(application: Application) : AndroidViewModel(applicatio
         if (module.id in _running.value) return
         viewModelScope.launch {
             _running.value = _running.value + module.id
-            val outcome = runner.run(module, getApplication(), _capabilities.value, selection.value)
+            val outcome = runner.run(
+                module,
+                getApplication(),
+                _capabilities.value,
+                selection.value,
+                _profile.value,
+            )
             _outcomes.value = _outcomes.value + (module.id to outcome)
             _running.value = _running.value - module.id
         }
+    }
+
+    fun selectProfile(profile: DeviceProfile) {
+        _profile.value = profile
     }
 
     fun requestVpnConsent() {

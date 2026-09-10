@@ -18,8 +18,9 @@ class WifiSurveyModule : PentestModule {
     override val id = "t0.wifi.survey"
     override val title = "WiFi survey & AP audit"
     override val description =
-        "Enumerates nearby access points and grades each one's advertised security: encryption suite, " +
-            "WPS exposure, management frame protection, hidden SSIDs."
+        "Grades each access point's advertised security: encryption suite, WPS exposure, management " +
+            "frame protection, hidden SSIDs. Audits the selected networks, or everything in range if " +
+            "nothing is selected."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.PASSIVE
     override val requiredPermissions = listOf(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -38,10 +39,26 @@ class WifiSurveyModule : PentestModule {
         radio.requestScan()
         delay(SCAN_SETTLE_MS)
 
-        val observations = radio.latestResults()
-        if (observations.isEmpty()) {
+        val visible = radio.latestResults()
+        if (visible.isEmpty()) {
             return ModuleOutcome.Failed(
                 "No scan results. Location services must be on device-wide, not just granted to the app.",
+            )
+        }
+
+        // The radio always hears the whole room — that is how RF works, and nothing an app does
+        // changes it. What the selection controls is what gets audited and written to the log.
+        val selected = context.targets.networks()
+        val observations = if (selected.isEmpty()) {
+            visible
+        } else {
+            val wanted = selected.map { it.bssid.uppercase() }.toSet()
+            visible.filter { it.bssid.uppercase() in wanted }
+        }
+
+        if (observations.isEmpty()) {
+            return ModuleOutcome.Blocked(
+                "None of the ${selected.size} selected network(s) are in range of the latest scan.",
             )
         }
 
@@ -89,7 +106,12 @@ class WifiSurveyModule : PentestModule {
         }
 
         return ModuleOutcome.Completed(
-            "${observations.size} AP(s) observed, $flagged weakness(es) flagged.",
+            if (selected.isEmpty()) {
+                "${observations.size} AP(s) observed, $flagged weakness(es) flagged."
+            } else {
+                "${observations.size} selected AP(s) audited of ${visible.size} in range, " +
+                    "$flagged weakness(es) flagged."
+            },
         )
     }
 

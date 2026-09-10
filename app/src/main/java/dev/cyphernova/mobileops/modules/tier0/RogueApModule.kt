@@ -37,13 +37,30 @@ class RogueApModule : PentestModule {
         radio.requestScan()
         delay(SCAN_SETTLE_MS)
 
+        // Scoped by SSID rather than BSSID on purpose: an evil twin is by definition a BSSID you
+        // did not select, so filtering to selected BSSIDs would discard the very thing being
+        // hunted. Selecting a network narrows which *names* are correlated, never which radios.
+        val selectedSsids = context.targets.networks()
+            .map { it.ssid }
+            .filter { it.isNotBlank() }
+            .toSet()
+
         val byNetwork = radio.latestResults()
             .filterNot { it.isHidden }
             .groupBy { it.ssid }
+            .let { grouped ->
+                if (selectedSsids.isEmpty()) grouped else grouped.filterKeys { it in selectedSsids }
+            }
             .filterValues { it.size > 1 }
 
         if (byNetwork.isEmpty()) {
-            return ModuleOutcome.Completed("No SSID is served by more than one BSSID; nothing to correlate.")
+            return ModuleOutcome.Completed(
+                if (selectedSsids.isEmpty()) {
+                    "No SSID is served by more than one BSSID; nothing to correlate."
+                } else {
+                    "The selected network(s) are each served by a single BSSID; nothing to correlate."
+                },
+            )
         }
 
         var suspicious = 0

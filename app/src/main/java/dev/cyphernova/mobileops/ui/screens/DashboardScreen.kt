@@ -19,7 +19,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.RadioButton
 import dev.cyphernova.mobileops.core.capability.Tier
+import dev.cyphernova.mobileops.core.identity.DeviceProfiles
 import dev.cyphernova.mobileops.ui.MobileOpsViewModel
 
 /**
@@ -71,6 +74,45 @@ fun DashboardScreen(viewModel: MobileOpsViewModel, onRequestPermissions: () -> U
             ) {
                 OutlinedButton(onClick = viewModel::refreshCapabilities) { Text("Re-probe") }
                 OutlinedButton(onClick = onRequestPermissions) { Text("Permissions") }
+            }
+        }
+
+        item {
+            val profile by viewModel.profile.collectAsState()
+            Card {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Identity profile", fontWeight = FontWeight.Bold)
+                    Text(
+                        "What this device presents to a network under test. Applying a profile " +
+                            "needs root — on a stock device this selection only tells the identity " +
+                            "audit what to compare against.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                    DeviceProfiles.builtIn.forEach { candidate ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.selectProfile(candidate) }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = profile.id == candidate.id,
+                                onClick = { viewModel.selectProfile(candidate) },
+                            )
+                            Column(Modifier.padding(start = 4.dp)) {
+                                Text(candidate.label, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    candidate.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 

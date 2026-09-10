@@ -54,6 +54,31 @@ right is the whole cost of rootless capture:
 Output opens directly in Wireshark. It sees **this device's traffic in full**; it does not see
 other stations' traffic, which needs monitor mode.
 
+## Device identity
+
+Identity profiles (Device tab) present this handset as something else to the network under test —
+a Windows laptop, a MacBook, a network printer, a fully random locally-administered address. The
+purpose is testing identity-based controls: MAC allow-lists, NAC device profiling, and the
+"printers are exempt" rule that so often turns out to be the way in.
+
+Be clear about where the line falls, because Android has spent several releases closing exactly
+these holes:
+
+| | Stock | Root |
+| --- | --- | --- |
+| Read own WiFi MAC | No — the platform returns the constant `02:00:00:00:00:00` | Yes |
+| Change WiFi MAC | No | Yes, `ip link` (some drivers still refuse) |
+| Change DHCP hostname | No | Yes |
+| Change outbound TTL | No | Yes, where the kernel's iptables has a TTL target |
+
+So on a stock phone the profile picker is an audit reference, not a disguise — `t0.identity.audit`
+reports what you are leaking and what a profile *would* change. Applying it is Tier 1.
+
+Worth knowing regardless of tier: Android 10+ already randomises the MAC per saved network, so the
+address on the air is not the hardware address. It is stable per SSID, so it still correlates
+across sessions on the same network. And the device name goes out as the DHCP hostname, which
+lands in the lease table no matter what the MAC says — that is the identifier people forget.
+
 ## Targets
 
 Modules that act on a host take their targets from the Targets tab: pick a WiFi network from a
@@ -70,10 +95,15 @@ halfway still parses up to the last complete record) and exports as a Markdown r
 ## Modules
 
 **Tier 0 — passive**
-- `t0.wifi.survey` — enumerates nearby APs and grades each one's advertised security: encryption
-  suite, WPS exposure, 802.11w management frame protection, hidden SSIDs.
+- `t0.wifi.survey` — grades each AP's advertised security: encryption suite, WPS exposure,
+  802.11w management frame protection, hidden SSIDs. Audits the selected networks, or everything
+  in range when nothing is selected.
 - `t0.wifi.rogue` — correlates every BSSID broadcasting each SSID and flags security downgrades
-  and vendor mismatches that suggest an evil twin. Detection, not impersonation.
+  and vendor mismatches that suggest an evil twin. Detection, not impersonation. Selecting a
+  network narrows which *names* are correlated, never which radios — an evil twin is by
+  definition a BSSID you did not select.
+- `t0.identity.audit` — reports what the network can learn about this handset: DHCP hostname,
+  MAC randomisation behaviour, and what the platform will not let an app read or change.
 - `t0.capture.vpn` — rootless traffic capture to pcap, as above. Run it again to stop.
 
 **Tier 0 — active**
@@ -87,6 +117,8 @@ halfway still parses up to the last complete record) and exports as a Markdown r
 **Tier 1**
 - `t1.capture.pcap` — tcpdump on a live interface. Managed mode, so this sees the device's own
   traffic plus broadcast and multicast — not other stations' unicast.
+- `t1.identity.spoof` — applies the selected identity profile: WiFi MAC, DHCP hostname and
+  outbound TTL.
 
 **Tier 2**
 - `t2.radio.monitor` — verifies a radio really enters monitor mode and enumerates the channels
@@ -105,7 +137,7 @@ Requires JDK 17+ and the Android SDK (compileSdk 35, build-tools 35.0.0). Point 
 
 ```
 gradle assembleDebug          # → app/build/outputs/apk/debug/app-debug.apk
-gradle testDebugUnitTest      # 32 tests: packet codec, CIDR, target selection, AP analysis
+gradle testDebugUnitTest      # 38 tests: packet codec, CIDR, targets, AP analysis, identity
 ```
 
 `minSdk` is 26, `targetSdk` 35.
@@ -116,6 +148,7 @@ gradle testDebugUnitTest      # 32 tests: packet codec, CIDR, target selection, 
 core/
   capability/   Tier, DeviceCapabilities, CapabilityProbe — what this device can actually do
   capture/      Packets, TcpRelay, UdpRelay, PcapWriter, CaptureVpnService — rootless capture
+  identity/     DeviceProfile, IdentityProbe — what this device presents to a network
   net/          Cidr4 — IPv4 address arithmetic
   target/       Target, TargetSelection — what modules are pointed at
   module/       PentestModule, ModuleRunner, ModuleRegistry — the single door every run goes through

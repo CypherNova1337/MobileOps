@@ -6,6 +6,8 @@ import androidx.core.content.ContextCompat
 import dev.cyphernova.mobileops.core.capability.DeviceCapabilities
 import dev.cyphernova.mobileops.core.evidence.EvidenceStore
 import dev.cyphernova.mobileops.core.evidence.Finding
+import dev.cyphernova.mobileops.core.identity.DeviceProfile
+import dev.cyphernova.mobileops.core.identity.DeviceProfiles
 import dev.cyphernova.mobileops.core.target.TargetSelection
 
 /** Why a module cannot be started right now, or null when it can. */
@@ -54,6 +56,7 @@ class ModuleRunner(private val evidenceStore: EvidenceStore) {
         context: Context,
         capabilities: DeviceCapabilities,
         targets: TargetSelection,
+        profile: DeviceProfile = DeviceProfiles.PASSTHROUGH,
     ): ModuleOutcome {
         blockerFor(module, context, capabilities, targets)?.let {
             return ModuleOutcome.Blocked("${it.headline}. ${it.remedy}")
@@ -63,6 +66,7 @@ class ModuleRunner(private val evidenceStore: EvidenceStore) {
             androidContext = context,
             capabilities = capabilities,
             targets = targets,
+            profile = profile,
         )
 
         return runCatching {
