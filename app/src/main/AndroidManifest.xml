@@ -32,6 +32,11 @@
         android:name="android.hardware.wifi"
         android:required="true" />
 
+    <!-- Optional: used to detect an external WiFi adapter on the USB bus. -->
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"

@@ -31,6 +31,46 @@ class MonitorModeModule : PentestModule {
         context: ModuleContext,
         emit: suspend (Finding) -> Unit,
     ): ModuleOutcome {
+        // Report the adapter before anything else: an unclaimed adapter is the usual reason this
+        // module cannot run, and "no iw binary" would be a misleading thing to say about it.
+        context.capabilities.usbAdapters.forEach { adapter ->
+            emit(
+                Finding(
+                    moduleId = id,
+                    observedAtEpochMs = System.currentTimeMillis(),
+                    severity = if (adapter.claimedByKernel) Severity.INFO else Severity.LOW,
+                    title = "${adapter.chipset} on USB (${adapter.identifier})",
+                    subject = adapter.identifier,
+                    detail = buildString {
+                        append(adapter.productName?.let { "$it. " } ?: "")
+                        append(
+                            if (adapter.claimedByKernel) {
+                                "Claimed by the kernel via ${adapter.driver}. "
+                            } else {
+                                "Present on the bus but unclaimed — no ${adapter.driver} in this kernel. "
+                            },
+                        )
+                        append(
+                            if (adapter.monitorCapable) {
+                                "This chipset supports monitor mode" +
+                                    if (adapter.injectionCapable) " and injection." else "."
+                            } else {
+                                "This chipset does not support monitor mode."
+                            },
+                        )
+                        adapter.blockers(context.capabilities.rooted).forEach { append(" $it") }
+                    },
+                    data = mapOf(
+                        "usb_id" to adapter.identifier,
+                        "chipset" to adapter.chipset,
+                        "driver" to adapter.driver,
+                        "firmware" to adapter.firmware.orEmpty(),
+                        "claimed" to adapter.claimedByKernel.toString(),
+                    ),
+                ),
+            )
+        }
+
         val iw = RootShell.which("iw")
             ?: return ModuleOutcome.Blocked(
                 "No `iw` binary. Monitor mode configuration needs iw (or a NetHunter-style toolchain).",

@@ -21,12 +21,36 @@ honest picture of what this handset can do *before* you rely on it in the field.
 | --- | --- | --- |
 | **Tier 0 — Stock** | Nothing | AP survey and security grading, rogue-AP correlation, subnet discovery, TCP service scanning, TLS/certificate audit, **full traffic capture to pcap** |
 | **Tier 1 — Root** | A working `su` | tcpdump on a live interface, raw sockets, firewall manipulation, bundled binaries |
-| **Tier 2 — Monitor** | Patched firmware (nexmon) or an OTG adapter with an `ath9k_htc` / `rtl8812au` driver | Monitor-mode verification and raw 802.11 capture |
+| **Tier 2 — Monitor** | A kernel carrying the adapter's driver, plus root — see below | Monitor-mode verification and raw 802.11 capture |
 
 The tier probe is not a version check. It asks for a root shell and reads the answer, walks
 `/sys/class/net` for a second radio, and looks for patched-firmware markers — because a `su`
 binary that denies every request is not root, and that difference matters before a module tries
 to run tcpdump.
+
+## External USB adapters
+
+An Alfa or similar USB adapter is the standard route to monitor mode, and the app detects one on
+the bus whether or not the kernel has claimed it. That distinction matters: an adapter with no
+driver is invisible in `/sys/class/net` and looks identical to no adapter at all, while the fix
+is completely different.
+
+Recognised chipsets include AR9271 and AR7010 (`ath9k_htc`), RTL8187, RTL8812AU and RTL8811CU,
+RT3070/RT5370 (`rt2800usb`), and MT7610U/MT7612U. An unlisted adapter is reported as unknown
+rather than guessed at.
+
+Plugging one in is the easy part. Using it needs, in order:
+
+1. **A kernel containing the driver.** Stock Android kernels do not ship `ath9k_htc` or any of
+   the others. In practice this means a custom or NetHunter kernel for the specific device — the
+   single hardest requirement, and the one no app can work around.
+2. **Firmware**, for chipsets that load it — `htc_9271.fw` for AR9271 — placed under
+   `/lib/firmware`, which needs root.
+3. **Root**, to load a module, place firmware, and reconfigure the interface.
+4. **Enough power over OTG.** These adapters draw around 500 mA; a powered OTG hub avoids a
+   brownout that presents as random disconnects.
+
+The Device tab lists what is detected and what each adapter is still missing.
 
 ## Rootless packet capture
 

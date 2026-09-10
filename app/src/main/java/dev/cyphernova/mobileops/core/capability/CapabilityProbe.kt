@@ -18,7 +18,8 @@ class CapabilityProbe(private val context: Context) {
         val (rooted, rootDetail) = probeRoot()
         val interfaces = wifiInterfaces()
         val external = interfaces.filter { it != PRIMARY_WLAN }
-        val (monitor, monitorDetail) = probeMonitorMode(rooted, external)
+        val usbAdapters = UsbWifiProbe(context).detect(interfaces)
+        val (monitor, monitorDetail) = probeMonitorMode(rooted, external, usbAdapters)
 
         DeviceCapabilities(
             sdkInt = Build.VERSION.SDK_INT,
@@ -27,6 +28,7 @@ class CapabilityProbe(private val context: Context) {
             rootDetail = rootDetail,
             wifiInterfaces = interfaces,
             externalAdapters = external,
+            usbAdapters = usbAdapters,
             monitorModeAvailable = monitor,
             monitorModeDetail = monitorDetail,
             scanThrottled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
@@ -77,12 +79,26 @@ class CapabilityProbe(private val context: Context) {
      * radio. On a stock Android 10+ device neither is on offer, so we say so plainly instead
      * of surfacing a module that will fail at run time.
      */
-    private fun probeMonitorMode(rooted: Boolean, external: List<String>): Pair<Boolean, String> {
+    private fun probeMonitorMode(
+        rooted: Boolean,
+        external: List<String>,
+        usbAdapters: List<UsbWifiAdapter>,
+    ): Pair<Boolean, String> {
+        // An adapter on the bus that the kernel never claimed is the most common state, and the
+        // one worth naming precisely — it looks like nothing at all from /sys/class/net.
+        val unclaimed = usbAdapters.filterNot { it.claimedByKernel }
+        if (unclaimed.isNotEmpty() && external.isEmpty()) {
+            val adapter = unclaimed.first()
+            return false to "${adapter.chipset} present on USB but unclaimed — no ${adapter.driver} " +
+                "driver in this kernel"
+        }
         if (!rooted) {
             return false to "requires root; the platform has not exposed monitor mode to apps since Android 10"
         }
         if (external.isNotEmpty()) {
-            return true to "external adapter present: ${external.joinToString()} (driver support still required)"
+            val chipset = usbAdapters.firstOrNull { it.claimedByKernel }?.chipset
+            return true to "external adapter present: ${external.joinToString()}" +
+                (chipset?.let { " ($it)" } ?: " (driver support still required)")
         }
         // Nexmon-style patches expose their firmware control node under the driver's debugfs dir.
         val nexmon = NEXMON_MARKERS.firstOrNull { File(it).exists() }

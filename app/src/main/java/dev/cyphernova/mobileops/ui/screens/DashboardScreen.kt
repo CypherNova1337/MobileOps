@@ -77,6 +77,48 @@ fun DashboardScreen(viewModel: MobileOpsViewModel, onRequestPermissions: () -> U
             }
         }
 
+        if (capabilities.usbAdapters.isNotEmpty()) {
+            item {
+                Card {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("USB adapters", fontWeight = FontWeight.Bold)
+                        capabilities.usbAdapters.forEach { adapter ->
+                            Text(
+                                "${adapter.chipset} (${adapter.identifier})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                            adapter.productName?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Text(
+                                if (adapter.claimedByKernel) {
+                                    "✓ claimed by the kernel · driver ${adapter.driver}"
+                                } else {
+                                    "✗ not claimed · needs ${adapter.driver}"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (adapter.claimedByKernel) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                },
+                            )
+                            adapter.blockers(capabilities.rooted).forEach { blocker ->
+                                Text(
+                                    "• $blocker",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             val profile by viewModel.profile.collectAsState()
             Card {
