@@ -186,6 +186,10 @@ halfway still parses up to the last complete record) and exports as a Markdown r
   grabbing. A full handshake lands in the target's logs; SYN scanning needs Tier 1.
 - `t0.tls.audit` — negotiated protocol and cipher, certificate expiry, self-signed chains, SHA-1
   and MD5 signatures.
+- `t0.exploit.webexposure` — unauthenticated admin pages, directory listings, exposed config and
+  version control, version-disclosing banners, missing security headers. GET requests only.
+- `t0.exploit.defaultcreds` — tests vendor default credentials against HTTP Basic auth. Stops at
+  the first pair that works.
 
 **Tier 1**
 - `t1.capture.pcap` — tcpdump on a live interface. Managed mode, so this sees the device's own
@@ -196,6 +200,22 @@ halfway still parses up to the last complete record) and exports as a Markdown r
 **Tier 2**
 - `t2.radio.monitor` — verifies a radio really enters monitor mode and enumerates the channels
   the driver reports.
+
+## Exploitation
+
+Recon establishes that something is reachable; exploitation establishes that it matters. The
+exploit modules are scoped to what proves a finding and stops:
+
+- **Default credentials** are tested against HTTP Basic auth with about two dozen vendor pairs,
+  spaced out, stopping at the first that works. That is enough to prove the device still has its
+  shipped credentials. It is deliberately not a password cracker — long lists against small
+  appliances trip lockouts and take devices off the network, which is a denial of service rather
+  than a test result. Form logins are detected and reported rather than driven, because every
+  vendor's form differs and submitting guesses blind risks locking the account.
+- **Web exposure** is read-only: every request is a GET, so nothing changes state on the target.
+  What is reachable is the whole proof.
+
+Both stop at demonstration. Neither pivots, persists, or modifies the target.
 
 ### Deliberately not implemented
 
