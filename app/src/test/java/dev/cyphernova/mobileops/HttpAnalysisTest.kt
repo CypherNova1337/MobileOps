@@ -54,6 +54,53 @@ class HttpAnalysisTest {
     }
 
     @Test
+    fun `a 200 access denied page is a rejection, not a win`() {
+        // The exact false positive this produced against a live Netgear: the device answers a
+        // rejected Basic auth with a friendly 200 HTML page. It has no password field, so a
+        // login-form check alone scored it CRITICAL.
+        val denied = response(body = "<html><body><h1>Access Denied</h1></body></html>")
+        assertTrue(HttpAnalysis.looksLikeAuthFailure(denied))
+        assertFalse(HttpAnalysis.credentialsAccepted(denied))
+    }
+
+    @Test
+    fun `common rejection wordings are all caught`() {
+        listOf(
+            "Authentication failed",
+            "Invalid password",
+            "Incorrect password",
+            "Login failed, please try again",
+            "You are not authorized to view this page",
+            "Session expired",
+        ).forEach { text ->
+            assertFalse("should reject: $text", HttpAnalysis.credentialsAccepted(response(body = text)))
+        }
+    }
+
+    @Test
+    fun `a genuine admin page is still accepted`() {
+        // The guard must not be so eager that a real success is thrown away.
+        val dashboard = response(body = "<title>RAX42 Router Status</title><h1>Connected Devices</h1>")
+        assertFalse(HttpAnalysis.looksLikeAuthFailure(dashboard))
+        assertTrue(HttpAnalysis.credentialsAccepted(dashboard))
+    }
+
+    @Test
+    fun `page title is extracted for evidence`() {
+        assertEquals(
+            "NETGEAR RAX42",
+            HttpAnalysis.pageTitle(response(body = "<html><head><title>NETGEAR RAX42</title></head>")),
+        )
+        assertNull(HttpAnalysis.pageTitle(response(body = "<h1>no title</h1>")))
+    }
+
+    @Test
+    fun `page title survives attributes and newlines`() {
+        val title = HttpAnalysis.pageTitle(response(body = "<title lang=\"en\">\n  Router\n</title>"))
+        assertEquals("Router", title)
+    }
+
+    @Test
     fun `a redirect back to login is not success`() {
         val toLogin = response(status = 302, headers = mapOf("location" to "/login.html"))
         assertFalse(HttpAnalysis.credentialsAccepted(toLogin))

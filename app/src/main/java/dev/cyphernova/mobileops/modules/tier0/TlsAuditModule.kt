@@ -49,9 +49,13 @@ class TlsAuditModule : PentestModule {
                         moduleId = id,
                         observedAtEpochMs = System.currentTimeMillis(),
                         severity = Severity.INFO,
-                        title = "No TLS on $host:$port",
+                        title = "TLS handshake failed on $host:$port",
                         subject = "$host:$port",
-                        detail = "The handshake did not complete; the port may be closed or speaking plaintext.",
+                        detail = "The handshake did not complete. On a LAN appliance the usual cause " +
+                            "is a self-signed or expired certificate this device will not trust, " +
+                            "not an absent service — the web exposure module uses a permissive " +
+                            "client and will still reach it. A closed port or a plaintext service " +
+                            "produces the same result here.",
                     ),
                 )
                 return@forEach

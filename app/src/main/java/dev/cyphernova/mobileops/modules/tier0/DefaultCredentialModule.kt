@@ -88,8 +88,42 @@ class DefaultCredentialModule : PentestModule {
                     ),
                 )
 
-                val working = tryCredentials(base, DefaultCredentials.forVendor(vendor))
+                // Negative control. Send a credential that cannot possibly be right; if the
+                // device answers it the same way it answers a correct one, then nothing this
+                // module observes afterwards means anything, and reporting a CRITICAL finding
+                // off the back of it would be inventing access that does not exist.
+                val control = LanHttpClient.probe(
+                    url = base,
+                    authorization = HttpAnalysis.basicAuthHeader(CONTROL_USER, CONTROL_PASSWORD),
+                )
+                if (control == null || HttpAnalysis.credentialsAccepted(control)) {
+                    emit(
+                        Finding(
+                            moduleId = id,
+                            observedAtEpochMs = System.currentTimeMillis(),
+                            severity = Severity.INFO,
+                            title = "Credential testing inconclusive at $base",
+                            subject = base,
+                            detail = "A deliberately invalid credential was " +
+                                (if (control == null) "not answered at all" else
+                                    "accepted (HTTP ${control.status}" +
+                                        (HttpAnalysis.pageTitle(control)?.let { ", page '$it'" } ?: "") + ")") +
+                                ". This device does not distinguish a wrong password from a right " +
+                                "one in a way that can be detected from outside, so no credential " +
+                                "result from it would be trustworthy. Test this interface by hand.",
+                            data = mapOf(
+                                "control_status" to (control?.status?.toString() ?: "no response"),
+                                "control_title" to (control?.let(HttpAnalysis::pageTitle).orEmpty()),
+                            ),
+                        ),
+                    )
+                    return@forEach
+                }
+
+                val hit = tryCredentials(base, DefaultCredentials.forVendor(vendor))
+                val working = hit?.first
                 if (working != null) {
+                    val evidence = hit.second
                     accepted++
                     emit(
                         Finding(
@@ -98,14 +132,20 @@ class DefaultCredentialModule : PentestModule {
                             severity = Severity.CRITICAL,
                             title = "Default credentials accepted at $base",
                             subject = base,
-                            detail = "The pair '$working' was accepted. This is full administrative " +
-                                "access to the device from anywhere on this network, and it is the " +
-                                "finding everything else on this host is downstream of. Change it " +
-                                "before anything else.",
+                            detail = "The pair '$working' was accepted where an invalid control " +
+                                "credential was refused, so the device does discriminate. It " +
+                                "answered HTTP ${evidence.status} with ${evidence.body.length} bytes" +
+                                (HttpAnalysis.pageTitle(evidence)?.let { ", page titled '$it'" } ?: "") +
+                                ". Verify by hand before reporting: open $base in a browser and " +
+                                "enter $working. If the browser disagrees, treat this as a false " +
+                                "positive and tell me what it showed.",
                             data = mapOf(
                                 "username" to working.username,
                                 "vendor" to working.vendor,
                                 "realm" to realm.orEmpty(),
+                                "status" to evidence.status.toString(),
+                                "bytes" to evidence.body.length.toString(),
+                                "page_title" to HttpAnalysis.pageTitle(evidence).orEmpty(),
                             ),
                         ),
                     )
@@ -133,7 +173,11 @@ class DefaultCredentialModule : PentestModule {
         }
     }
 
-    private suspend fun tryCredentials(base: String, credentials: List<Credential>): Credential? {
+    /** Returns the pair that worked along with the response that proves it. */
+    private suspend fun tryCredentials(
+        base: String,
+        credentials: List<Credential>,
+    ): Pair<Credential, dev.cyphernova.mobileops.core.exploit.HttpResponse>? {
         credentials.forEach { credential ->
             // Spaced out: rapid-fire attempts are what trigger lockouts and reboots on the
             // small appliances this is most often pointed at.
@@ -144,13 +188,15 @@ class DefaultCredentialModule : PentestModule {
                 authorization = HttpAnalysis.basicAuthHeader(credential.username, credential.password),
             ) ?: return@forEach
 
-            if (HttpAnalysis.credentialsAccepted(response)) return credential
+            if (HttpAnalysis.credentialsAccepted(response)) return credential to response
         }
         return null
     }
 
     private companion object {
         const val ATTEMPT_SPACING_MS = 250L
+        const val CONTROL_USER = "mobileops-control"
+        const val CONTROL_PASSWORD = "nx8Qv2-not-a-real-password-4Kd1"
         val PORTS = listOf(80 to "http", 8080 to "http", 443 to "https", 8443 to "https")
     }
 }
