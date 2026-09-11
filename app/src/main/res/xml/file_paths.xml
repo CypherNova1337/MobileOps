@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!--
+      Only the CA's public certificate is shared. The private key sits beside it in the same
+      directory inside a keystore and is deliberately not exposed by any path here: anyone
+      holding it could impersonate any site to a device trusting this CA.
+    -->
+    <files-path
+        name="ca-certificate"
+        path="tls/" />
+</paths>
