@@ -22,7 +22,7 @@ import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
 import java.security.SecureRandom
-import java.security.Security
+import java.security.Provider
 import java.security.cert.X509Certificate
 import java.util.Base64
 import java.util.Date
@@ -104,10 +104,10 @@ class CertificateAuthority(private val directory: File) {
         }
 
         val signer = JcaContentSignerBuilder(SIGNATURE_ALGORITHM)
-            .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+            .setProvider(bouncyCastle)
             .build(keyPair.private)
         val certificate = JcaX509CertificateConverter()
-            .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+            .setProvider(bouncyCastle)
             .getCertificate(builder.build(signer))
 
         KeyStore.getInstance("PKCS12").apply {
@@ -166,12 +166,12 @@ class CertificateAuthority(private val directory: File) {
             }
 
             val signer = JcaContentSignerBuilder(SIGNATURE_ALGORITHM)
-                .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+                .setProvider(bouncyCastle)
                 .build(signingKey)
 
             LeafIdentity(
                 certificate = JcaX509CertificateConverter()
-                    .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+                    .setProvider(bouncyCastle)
                     .getCertificate(builder.build(signer)),
                 privateKey = keyPair.private,
             )
@@ -205,7 +205,9 @@ class CertificateAuthority(private val directory: File) {
     }
 
     private fun generateKeyPair(): KeyPair =
-        KeyPairGenerator.getInstance("RSA", BouncyCastleProvider.PROVIDER_NAME).apply {
+        // Platform RSA key generation is fine and considerably faster than BouncyCastle's;
+        // only certificate signing needs the full provider.
+        KeyPairGenerator.getInstance("RSA").apply {
             initialize(KEY_BITS, SecureRandom())
         }.generateKeyPair()
 
@@ -239,13 +241,20 @@ class CertificateAuthority(private val directory: File) {
         private const val BACKDATE_MS = 24L * 60 * 60 * 1000
         private val IPV4 = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
 
+        /**
+         * Our own BouncyCastle instance, used directly rather than registered.
+         *
+         * Android already ships a cut-down BouncyCastle registered under the name "BC", which
+         * has no SHA256withRSA signer. Asking for a provider *by name* therefore resolves to
+         * the platform's stripped copy, and registering over it either fails silently — a
+         * provider of that name already exists — or displaces crypto the rest of the system is
+         * relying on. Holding the instance and passing it to each builder sidesteps the name
+         * lookup entirely and leaves the platform's providers untouched.
+         */
+        val bouncyCastle: Provider = BouncyCastleProvider()
+
         fun ensureProvider() {
-            if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
-                // Android ships a cut-down BouncyCastle under a different name; inserting ours
-                // ahead of it is what makes certificate generation available at all.
-                Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME)
-                Security.insertProviderAt(BouncyCastleProvider(), 1)
-            }
+            // Nothing to register: the provider is passed to each builder directly.
         }
     }
 }

@@ -68,20 +68,41 @@ class EvidenceStore(private val directory: File) {
                 appendLine()
             }
 
-            appendLine("## Findings (${findings.size})")
+            val distinct = findings.groupBy { Triple(it.moduleId, it.title, it.subject) }.size
+            appendLine(
+                if (distinct == findings.size) {
+                    "## Findings ($distinct)"
+                } else {
+                    "## Findings ($distinct distinct, ${findings.size} observations)"
+                },
+            )
             appendLine()
             if (findings.isEmpty()) {
                 appendLine("No findings recorded.")
                 return@buildString
             }
-            findings.sortedWith(
-                compareByDescending<Finding> { it.severity.rank }.thenBy { it.observedAtEpochMs },
-            ).forEach { finding ->
+            // Re-running a module re-files everything it sees, so a second pass doubles the
+            // report. Identical observations are collapsed into one entry with a count; the log
+            // itself stays append-only and complete.
+            findings.groupBy { Triple(it.moduleId, it.title, it.subject) }
+                .values
+                .map { group -> group.maxBy { it.observedAtEpochMs } to group }
+                .sortedWith(
+                    compareByDescending<Pair<Finding, List<Finding>>> { it.first.severity.rank }
+                        .thenBy { it.first.observedAtEpochMs },
+                )
+                .forEach { (finding, group) ->
                 appendLine("### [${finding.severity.label}] ${finding.title}")
                 appendLine()
                 appendLine("- **Subject:** ${finding.subject}")
                 appendLine("- **Module:** `${finding.moduleId}`")
                 appendLine("- **Observed:** ${formatTime(finding.observedAtEpochMs)}")
+                if (group.size > 1) {
+                    appendLine(
+                        "- **Seen:** ${group.size} times, first at " +
+                            formatTime(group.minOf { it.observedAtEpochMs }),
+                    )
+                }
                 appendLine()
                 appendLine(finding.detail)
                 if (finding.data.isNotEmpty()) {

@@ -114,11 +114,46 @@ class WebExposureModule : PentestModule {
                     )
                 }
 
+                // Baseline control. Ask for a path that cannot exist. If the device answers it
+                // with a 200, it answers everything with a 200, and every "exposed path" below
+                // would be the same page wearing different names — which is exactly what it
+                // looked like when nine unrelated paths all returned an identical 2489 bytes.
+                val baseline = LanHttpClient.probe("$base/$CONTROL_PATH")
+                val answersEverything = baseline != null &&
+                    baseline.isSuccess &&
+                    !HttpAnalysis.isSoftError(baseline)
+
+                if (answersEverything) {
+                    findings++
+                    emit(
+                        Finding(
+                            moduleId = id,
+                            observedAtEpochMs = System.currentTimeMillis(),
+                            severity = Severity.LOW,
+                            title = "Answers every path identically",
+                            subject = base,
+                            detail = "A deliberately nonexistent path returned HTTP " +
+                                "${baseline!!.status} with ${baseline.body.length} bytes" +
+                                (HttpAnalysis.pageTitle(baseline)?.let { ", titled '$it'" } ?: "") +
+                                ". This device does not distinguish a real path from an invented " +
+                                "one, so path probing cannot tell you anything here and was " +
+                                "skipped. Anything genuinely exposed must be found by hand.",
+                            data = mapOf(
+                                "control_status" to baseline.status.toString(),
+                                "control_bytes" to baseline.body.length.toString(),
+                            ),
+                        ),
+                    )
+                    return@forEach
+                }
+
                 SENSITIVE_PATHS.forEach { (path, description) ->
                     delay(REQUEST_SPACING_MS)
                     val response = LanHttpClient.probe("$base$path") ?: return@forEach
                     if (!response.isSuccess || HttpAnalysis.isSoftError(response)) return@forEach
                     if (response.body.isBlank()) return@forEach
+                    // Byte-identical to the known-bad path means it is that page, not this one.
+                    if (baseline != null && response.body.length == baseline.body.length) return@forEach
 
                     findings++
                     emit(
@@ -158,6 +193,9 @@ class WebExposureModule : PentestModule {
 
     private companion object {
         const val REQUEST_SPACING_MS = 60L
+
+        /** A path no device could legitimately serve, used to detect catch-all responders. */
+        const val CONTROL_PATH = "mobileops-control-9f2a7c41"
 
         val PORTS = listOf(80 to "http", 8080 to "http", 443 to "https", 8443 to "https")
 
