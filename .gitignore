@@ -10,3 +10,7 @@ captures/
 *.apk
 *.keystore
 *.jks
+
+# Kotlin compiler scratch state and daemon logs, which also capture local
+# environment details that have no business in the repository.
+.kotlin/
