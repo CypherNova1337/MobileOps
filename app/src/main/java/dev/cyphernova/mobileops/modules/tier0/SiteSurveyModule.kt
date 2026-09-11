@@ -141,7 +141,10 @@ class SiteSurveyModule : PentestModule {
             Finding(
                 moduleId = id,
                 observedAtEpochMs = System.currentTimeMillis(),
-                severity = if (overlapping.size > 2) Severity.LOW else Severity.INFO,
+                // Congestion is a performance observation, not a weakness. It stays in the
+                // report because it is cheap and occasionally explains a flaky link, but it
+                // never competes for attention with something exploitable.
+                severity = Severity.INFO,
                 title = "Channel usage across ${byChannel.size} channel(s)",
                 subject = "RF environment",
                 detail = buildString {
@@ -174,9 +177,10 @@ class SiteSurveyModule : PentestModule {
             Finding(
                 moduleId = id,
                 observedAtEpochMs = System.currentTimeMillis(),
-                // An AP with a randomised BSSID is not normal — infrastructure does not randomise,
-                // so it is either a phone hotspot or something trying not to be identified.
-                severity = if (randomised.isNotEmpty()) Severity.LOW else Severity.INFO,
+                // A vendor census is inventory. The randomised-BSSID count inside it is the
+                // only part that points at anything, and it gets its own per-AP finding below,
+                // so this one does not need a severity of its own.
+                severity = Severity.INFO,
                 title = "Equipment vendors in range",
                 subject = "RF environment",
                 detail = buildString {
@@ -204,10 +208,12 @@ class SiteSurveyModule : PentestModule {
         all.forEach { entry ->
             val ap = entry.observation
             val profile = ApSecurityAnalyser.analyse(ap)
+            // Deliberately not listing WPS here. The survey module already reports it at HIGH
+            // with the derived PIN candidates attached, and repeating it at LOW in the same run
+            // buries that under a duplicate.
             val reasons = buildList {
                 if (profile.encryption == Encryption.OPEN) add("open, no encryption at all")
                 if (profile.encryption == Encryption.WEP) add("WEP, which is broken")
-                if (profile.wpsEnabled) add("WPS advertised")
                 if (OuiLookup.isLocallyAdministered(ap.bssid)) add("randomised BSSID")
             }
             if (reasons.isEmpty()) return@forEach

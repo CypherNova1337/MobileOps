@@ -4,6 +4,7 @@ import dev.cyphernova.mobileops.modules.tier0.DefaultCredentialModule
 import dev.cyphernova.mobileops.modules.tier0.BleReconModule
 import dev.cyphernova.mobileops.modules.tier0.BluetoothClassicModule
 import dev.cyphernova.mobileops.modules.tier0.CellularSurveyModule
+import dev.cyphernova.mobileops.modules.tier0.HandshakeCrackModule
 import dev.cyphernova.mobileops.modules.tier0.HostDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.NetworkJoinModule
 import dev.cyphernova.mobileops.modules.tier0.IdentityAuditModule
@@ -48,6 +49,7 @@ object ModuleRegistry {
         WebExposureModule(),
         DefaultCredentialModule(),
         WpsRegistrarModule(),
+        HandshakeCrackModule(),
         VpnCaptureModule(),
         TlsInterceptModule(),
         IdentityAuditModule(),

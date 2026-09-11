@@ -296,6 +296,9 @@ scattered among usable ones.
   version control, version-disclosing banners, missing security headers. GET requests only.
 - `t0.exploit.defaultcreds` — tests vendor default credentials against HTTP Basic auth. Stops at
   the first pair that works.
+- `t0.crack.handshake` — recovers a WPA2 passphrase offline from a captured four-way handshake
+  or PMKID, and hands it to the join module. Needs no network; the capture has to come from an
+  adapter that does monitor mode.
 - `t0.exploit.wpsregistrar` — attacks the WPS External Registrar over UPnP. Tries unauthenticated
   settings retrieval, then the full M1-M8 registrar exchange with PINs derived from the AP's own
   MAC address, then finishes a half-recovered PIN. Recovers the WPA passphrase where it works.
@@ -338,6 +341,38 @@ exploit modules are scoped to what proves a finding and stops:
   leaves it exactly as it was found.
 
 These stop at demonstration. None pivots, persists, or modifies the target.
+
+### Getting onto a network you do not have the key for
+
+`t0.wifi.join` authenticates — it needs the passphrase. These are the routes that do not, and
+the list is short on purpose because most of them are closed on a stock handset:
+
+| Route | Status on a stock Pixel |
+| --- | --- |
+| WPS PIN over the air | **Closed.** `WifiManager.startWps()` was deprecated in API 26 and removed in API 28. There is no replacement API, and the frames it used to send need injection. |
+| WPS registrar over UPnP | **Open, but post-access.** It is an IP-layer attack, so it needs a route to the AP already — useful for pivoting off a guest network to the main passphrase, not for the first step. |
+| Offline handshake or PMKID cracking | **Open**, and the one that actually works. The capture has to come from hardware that does monitor mode; the phone does the search. |
+| Online WPA2 guessing | **Closed.** `WifiNetworkSpecifier` raises a system dialog per attempt, and network suggestions are auto-join hints the platform schedules rather than a way to test keys at any useful rate. |
+| WEP | Crackable in principle, but capturing the traffic needs monitor mode, and nothing modern actually runs it. |
+| Open network with a captive portal | Joinable outright; the portal is then a web target like any other. |
+
+So the realistic chain is: survey off-network to pick the target and derive its likely WPS PIN →
+capture a handshake or PMKID with an adapter that can → crack it on the phone with
+`t0.crack.handshake` → the recovered key is handed straight to `t0.wifi.join`.
+
+`t0.crack.handshake` reads `.22000` and `.hccapx` files from
+`Android/data/dev.cyphernova.mobileops/files/handshakes/`, and a wordlist from the `wordlists/`
+folder beside it — both reachable from a file manager with no storage permission. `hcxpcapngtool`
+converts a pcapng to `.22000`. Candidates are ordered cheapest-first: names derived from the SSID,
+then the router-label shapes, then the wordlist, because a phone manages a few thousand PBKDF2
+derivations a second and ordering is most of what makes that useful.
+
+It requires a selected target. A capture file usually holds handshakes for every AP that was
+audible when it was taken, and only the one under test should be attacked.
+
+A failed run means the passphrase was not in the candidates tried. It does not mean the network
+is secure — the same capture can be worked indefinitely, on faster hardware, against a larger
+list, with nothing on the network able to notice.
 
 ### WiFi attacks and what a phone can reach
 
