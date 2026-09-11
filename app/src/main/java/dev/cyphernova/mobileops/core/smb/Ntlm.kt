@@ -81,6 +81,13 @@ object Ntlm {
         val dnsDomain: String? = null,
         val dnsForest: String? = null,
         val osVersion: String? = null,
+        /**
+         * True when the version came with no build number. A build number names a real Windows
+         * release that can be matched against published advisories; a bare major.minor is what
+         * Samba sends as a compatibility level, and treating it as a Windows version invites a
+         * reader to conclude Windows 7 about a Linux appliance.
+         */
+        val osVersionIsCompatibilityClaim: Boolean = false,
     ) {
         /**
          * True when the names describe a domain member rather than a standalone machine. On a
@@ -109,7 +116,14 @@ object Ntlm {
                 dnsForest?.takeIf { !it.equals(dnsDomain, ignoreCase = true) }
                     ?.let { append("Forest '$it'. ") }
             }
-            osVersion?.let { append("OS version $it. ") }
+            osVersion?.let {
+                append("OS version $it")
+                if (osVersionIsCompatibilityClaim) {
+                    append(" — sent with no build number, which is how Samba advertises a " +
+                        "Windows compatibility level rather than a Windows release")
+                }
+                append(". ")
+            }
         }.trim()
     }
 
@@ -134,21 +148,14 @@ object Ntlm {
 
         // The version block sits between the fixed fields and the payload, and only when the
         // server said it would send one.
-        // A build number makes the version a real Windows release that can be matched against
-        // published advisories. Samba sends a compatibility major/minor with no build at all, and
-        // printing "6.1 build 0" invites a reader to conclude Windows 7 about a Linux appliance.
-        val osVersion = if (flags and NEGOTIATE_VERSION != 0 && message.size >= 56) {
-            val major = message[48].toInt() and 0xFF
-            val minor = message[49].toInt() and 0xFF
-            val build = view.getShort(50).toInt() and 0xFFFF
-            when {
-                major == 0 -> null
-                build == 0 -> "$major.$minor claimed, with no build number — typically Samba " +
-                    "advertising a Windows compatibility level rather than a Windows release"
-                else -> "$major.$minor build $build"
-            }
-        } else {
-            null
+        val hasVersion = flags and NEGOTIATE_VERSION != 0 && message.size >= 56
+        val major = if (hasVersion) message[48].toInt() and 0xFF else 0
+        val minor = if (hasVersion) message[49].toInt() and 0xFF else 0
+        val build = if (hasVersion) view.getShort(50).toInt() and 0xFFFF else 0
+        val osVersion = when {
+            !hasVersion || major == 0 -> null
+            build == 0 -> "$major.$minor"
+            else -> "$major.$minor build $build"
         }
 
         val pairs = parseTargetInfo(targetInfo)
@@ -160,6 +167,7 @@ object Ntlm {
             dnsDomain = pairs[AV_DNS_DOMAIN],
             dnsForest = pairs[AV_DNS_FOREST],
             osVersion = osVersion,
+            osVersionIsCompatibilityClaim = osVersion != null && build == 0,
         )
     }
 

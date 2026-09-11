@@ -161,7 +161,12 @@ object Smb {
         return frame(smb2Header(SMB2_SESSION_SETUP, messageId, sessionId) + body.array())
     }
 
-    private fun smb2Header(command: Int, messageId: Long, sessionId: Long = 0): ByteArray {
+    private fun smb2Header(
+        command: Int,
+        messageId: Long,
+        sessionId: Long = 0,
+        treeId: Int = 0,
+    ): ByteArray {
         val header = ByteBuffer.allocate(SMB2_HEADER_BYTES).order(ByteOrder.LITTLE_ENDIAN)
         header.put(0xFE.toByte())
         header.put(SMB_LETTERS)
@@ -174,7 +179,7 @@ object Smb {
         header.putInt(0)                              // NextCommand
         header.putLong(messageId)
         header.putInt(0)                              // Reserved
-        header.putInt(0)                              // TreeId
+        header.putInt(treeId)
         header.putLong(sessionId)
         header.put(ByteArray(16))                     // Signature
         return header.array()
@@ -258,9 +263,133 @@ object Smb {
         return response.copyOfRange(4, 4 + declared)
     }
 
+
+    // ---- Reaching a share ----------------------------------------------------------------------
+
+    /**
+     * A tree connect to `\\host\share`.
+     *
+     * The response status alone separates three cases an operator needs kept apart: the share
+     * exists and this session can reach it, the share exists and the session is refused, or there
+     * is no such share. Reporting "null session accepted" without any of that says nothing about
+     * what a stranger can actually read.
+     */
+    fun smb2TreeConnectRequest(host: String, share: String, messageId: Long, sessionId: Long): ByteArray {
+        val path = "\\\\$host\\$share".toByteArray(Charsets.UTF_16LE)
+        val bodyFixed = 8
+        val body = ByteBuffer.allocate(bodyFixed + path.size).order(ByteOrder.LITTLE_ENDIAN)
+        body.putShort(9)                                          // StructureSize
+        body.putShort(0)                                          // Flags / Reserved
+        body.putShort((SMB2_HEADER_BYTES + bodyFixed).toShort())  // PathOffset
+        body.putShort(path.size.toShort())
+        body.put(path)
+        return frame(smb2Header(SMB2_TREE_CONNECT, messageId, sessionId) + body.array())
+    }
+
+    /** The tree id a successful tree connect granted, read from the response header. */
+    fun treeIdOf(response: ByteArray): Int {
+        val body = stripFrame(response) ?: return 0
+        if (body.size < SMB2_HEADER_BYTES) return 0
+        return ByteBuffer.wrap(body).order(ByteOrder.LITTLE_ENDIAN).getInt(36)
+    }
+
+    /** Opens a named pipe — `srvsvc` is the one that can list shares. */
+    fun smb2CreateRequest(
+        name: String,
+        messageId: Long,
+        sessionId: Long,
+        treeId: Int,
+    ): ByteArray {
+        val encoded = name.toByteArray(Charsets.UTF_16LE)
+        val bodyFixed = 56
+        val body = ByteBuffer.allocate(bodyFixed + encoded.size).order(ByteOrder.LITTLE_ENDIAN)
+        body.putShort(57)                                         // StructureSize
+        body.put(0)                                               // SecurityFlags
+        body.put(0)                                               // RequestedOplockLevel
+        body.putInt(2)                                            // Impersonation
+        body.putLong(0)                                           // SmbCreateFlags
+        body.putLong(0)                                           // Reserved
+        body.putInt(0x0012019F)                                   // DesiredAccess: read/write pipe
+        body.putInt(0)                                            // FileAttributes
+        body.putInt(7)                                            // ShareAccess: read/write/delete
+        body.putInt(1)                                            // CreateDisposition: FILE_OPEN
+        body.putInt(0x40)                                         // CreateOptions: non-directory
+        body.putShort((SMB2_HEADER_BYTES + bodyFixed).toShort())  // NameOffset
+        body.putShort(encoded.size.toShort())
+        body.putInt(0)                                            // CreateContextsOffset
+        body.putInt(0)                                            // CreateContextsLength
+        body.put(encoded)
+        return frame(smb2Header(SMB2_CREATE, messageId, sessionId, treeId) + body.array())
+    }
+
+    /** The 16-byte handle a create returned, or null if it did not succeed. */
+    fun fileIdOf(response: ByteArray): ByteArray? {
+        val body = stripFrame(response) ?: return null
+        if (body.size < SMB2_HEADER_BYTES + 80) return null
+        if (statusOf(response) != STATUS_SUCCESS) return null
+        return body.copyOfRange(SMB2_HEADER_BYTES + 64, SMB2_HEADER_BYTES + 80)
+    }
+
+    /**
+     * Writes to a named pipe and reads the reply in one exchange.
+     *
+     * A DCERPC call is a write followed by a read, and doing it as two SMB operations means two
+     * round trips and a handle that can go stale between them. FSCTL_PIPE_TRANSCEIVE is the one
+     * operation that does both.
+     */
+    fun smb2PipeTransceiveRequest(
+        fileId: ByteArray,
+        input: ByteArray,
+        messageId: Long,
+        sessionId: Long,
+        treeId: Int,
+    ): ByteArray {
+        require(fileId.size == 16) { "a file id is 16 bytes" }
+        val bodyFixed = 56
+        val inputOffset = SMB2_HEADER_BYTES + bodyFixed
+        val body = ByteBuffer.allocate(bodyFixed + input.size).order(ByteOrder.LITTLE_ENDIAN)
+        body.putShort(57)                       // StructureSize
+        body.putShort(0)                        // Reserved
+        body.putInt(FSCTL_PIPE_TRANSCEIVE)
+        body.put(fileId)
+        body.putInt(inputOffset)
+        body.putInt(input.size)
+        body.putInt(0)                          // MaxInputResponse
+        body.putInt(inputOffset + input.size)   // OutputOffset
+        body.putInt(0)                          // OutputCount
+        body.putInt(MAX_PIPE_RESPONSE)
+        body.putInt(1)                          // IS_FSCTL
+        body.putInt(0)                          // Reserved2
+        body.put(input)
+        return frame(smb2Header(SMB2_IOCTL, messageId, sessionId, treeId) + body.array())
+    }
+
+    /** The pipe's reply, sliced out of an ioctl response. */
+    fun ioctlOutput(response: ByteArray): ByteArray? {
+        val body = stripFrame(response) ?: return null
+        if (body.size < SMB2_HEADER_BYTES + 48) return null
+        val view = ByteBuffer.wrap(body).order(ByteOrder.LITTLE_ENDIAN)
+        // Measured from the start of the header, like every other offset in SMB2.
+        val offset = view.getInt(SMB2_HEADER_BYTES + 32)
+        val count = view.getInt(SMB2_HEADER_BYTES + 36)
+        if (offset < 0 || count <= 0 || offset.toLong() + count > body.size) return null
+        return body.copyOfRange(offset, offset + count)
+    }
+
     const val SMB2_HEADER_BYTES = 64
     const val SMB2_NEGOTIATE = 0x0000
     const val SMB2_SESSION_SETUP = 0x0001
+    const val SMB2_TREE_CONNECT = 0x0003
+    const val SMB2_CREATE = 0x0005
+    const val SMB2_IOCTL = 0x000B
+
+    const val FSCTL_PIPE_TRANSCEIVE = 0x0011C017
+
+    const val STATUS_BAD_NETWORK_NAME = 0xC00000CC.toInt()
+    const val STATUS_NOT_FOUND = 0xC0000225.toInt()
+
+    /** A share list is a few kilobytes; a reply far past that is not one. */
+    private const val MAX_PIPE_RESPONSE = 64 * 1024
 
     const val STATUS_SUCCESS = 0
     const val STATUS_MORE_PROCESSING_REQUIRED = 0xC0000016.toInt()

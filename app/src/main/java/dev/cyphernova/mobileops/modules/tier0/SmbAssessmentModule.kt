@@ -10,6 +10,7 @@ import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
 import dev.cyphernova.mobileops.core.smb.Ntlm
 import dev.cyphernova.mobileops.core.smb.Smb
+import dev.cyphernova.mobileops.core.smb.SrvSvc
 import dev.cyphernova.mobileops.core.target.HostHarvest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -78,6 +79,10 @@ class SmbAssessmentModule : PentestModule {
             if (assessment.nullSession) {
                 weak++
                 emit(nullSessionFinding(host, assessment.challenge))
+                if (assessment.shares.isNotEmpty()) {
+                    weak++
+                    emit(shareFinding(host, assessment.shares))
+                }
             }
             assessment.challenge?.let { emit(disclosureFinding(host, it)) }
         }
@@ -122,6 +127,7 @@ class SmbAssessmentModule : PentestModule {
         val negotiated: Smb.Negotiated?,
         val challenge: Ntlm.Challenge?,
         val nullSession: Boolean,
+        val shares: List<SrvSvc.Share> = emptyList(),
     )
 
     private suspend fun assess(host: String): Assessment? = withContext(Dispatchers.IO) {
@@ -135,6 +141,7 @@ class SmbAssessmentModule : PentestModule {
         var negotiated: Smb.Negotiated? = null
         var challenge: Ntlm.Challenge? = null
         var nullSession = false
+        var shares: List<SrvSvc.Share> = emptyList()
 
         runCatching {
             Socket().use { socket ->
@@ -164,11 +171,55 @@ class SmbAssessmentModule : PentestModule {
                     ),
                 ) ?: return@use
                 nullSession = Smb.statusOf(authReply) == Smb.STATUS_SUCCESS
+
+                // Only worth asking once the session exists. "Null session accepted" is a
+                // statement about what might be reachable; the share list is what is.
+                if (nullSession) {
+                    shares = enumerateShares(socket, host, sessionId)
+                }
             }
         }
 
         if (!smb1 && negotiated == null) return@withContext null
-        Assessment(port, smb1, negotiated, challenge, nullSession)
+        Assessment(port, smb1, negotiated, challenge, nullSession, shares)
+    }
+
+    /**
+     * Asks the server what it is sharing, over the `srvsvc` pipe on IPC$.
+     *
+     * Four steps, each of which can legitimately fail on a hardened host: connect to IPC$, open
+     * the pipe, bind to the interface, make the call. A refusal at any of them is an answer — it
+     * means the null session exists but cannot enumerate — so none of them is an error.
+     */
+    private fun enumerateShares(socket: Socket, host: String, sessionId: Long): List<SrvSvc.Share> {
+        val tree = roundTrip(
+            socket,
+            Smb.smb2TreeConnectRequest(host, "IPC$", messageId = 3, sessionId = sessionId),
+        ) ?: return emptyList()
+        if (Smb.statusOf(tree) != Smb.STATUS_SUCCESS) return emptyList()
+        val treeId = Smb.treeIdOf(tree)
+
+        val create = roundTrip(
+            socket,
+            Smb.smb2CreateRequest("srvsvc", messageId = 4, sessionId = sessionId, treeId = treeId),
+        ) ?: return emptyList()
+        val fileId = Smb.fileIdOf(create) ?: return emptyList()
+
+        val bind = roundTrip(
+            socket,
+            Smb.smb2PipeTransceiveRequest(
+                fileId, SrvSvc.bindRequest(), messageId = 5, sessionId, treeId,
+            ),
+        ) ?: return emptyList()
+        if (!SrvSvc.isBindAccepted(Smb.ioctlOutput(bind) ?: return emptyList())) return emptyList()
+
+        val call = roundTrip(
+            socket,
+            Smb.smb2PipeTransceiveRequest(
+                fileId, SrvSvc.netShareEnumRequest(host), messageId = 6, sessionId, treeId,
+            ),
+        ) ?: return emptyList()
+        return SrvSvc.parseShares(Smb.ioctlOutput(call) ?: return emptyList())
     }
 
     private fun reachable(host: String, port: Int): Boolean = runCatching {
@@ -308,6 +359,64 @@ class SmbAssessmentModule : PentestModule {
         ),
     )
 
+    /**
+     * What the null session actually reached.
+     *
+     * This is the finding that turns a configuration note into something an assessor can put in
+     * front of an owner: not "anonymous access is permitted" but "anonymous access lists these
+     * shares, and these hold files".
+     */
+    private fun shareFinding(host: String, shares: List<SrvSvc.Share>) = Finding(
+        moduleId = id,
+        observedAtEpochMs = System.currentTimeMillis(),
+        severity = if (shares.any { it.holdsFiles && !it.isAdministrative }) {
+            Severity.CRITICAL
+        } else {
+            Severity.MEDIUM
+        },
+        title = "Shares listed without credentials on $host",
+        subject = host,
+        detail = buildString {
+            append("A caller presenting no username and no password enumerated ")
+            append("${shares.size} share(s): ")
+            append(
+                shares.joinToString("; ") { share ->
+                    buildString {
+                        append(share.name)
+                        append(" (${share.kind}")
+                        if (share.isAdministrative) append(", administrative")
+                        append(")")
+                        if (share.remark.isNotBlank()) append(" \"${share.remark}\"")
+                    }
+                },
+            )
+            append(". ")
+            val files = shares.filter { it.holdsFiles && !it.isAdministrative }
+            if (files.isEmpty()) {
+                append(
+                    "None of these is a file share, so the disclosure is the list itself: it " +
+                        "names the machine's role and gives an attacker the share names to aim " +
+                        "credentials at.",
+                )
+            } else {
+                append(
+                    "${files.joinToString { it.name }} hold files. Whether their contents are " +
+                        "readable depends on the permissions on each one, which is the next " +
+                        "thing to check by hand — but the names, the layout and the comments " +
+                        "are already disclosed to anyone on this segment, and client isolation " +
+                        "is not in effect here.",
+                )
+            }
+        },
+        data = mapOf(
+            "host" to host,
+            "share_count" to shares.size.toString(),
+            "shares" to shares.joinToString { it.name },
+            "file_shares" to shares.filter { it.holdsFiles && !it.isAdministrative }
+                .joinToString { it.name },
+        ).filterValues { it.isNotBlank() },
+    )
+
     private fun nullSessionFinding(host: String, challenge: Ntlm.Challenge?) = Finding(
         moduleId = id,
         observedAtEpochMs = System.currentTimeMillis(),
@@ -346,6 +455,8 @@ class SmbAssessmentModule : PentestModule {
                 )
             }
         },
+        // Blank entries are dropped rather than printed as empty keys: a field the server did
+        // not send is not a field worth a line in the report.
         data = mapOf(
             "host" to host,
             "netbios_name" to challenge.netbiosComputer.orEmpty(),
@@ -354,8 +465,9 @@ class SmbAssessmentModule : PentestModule {
             "dns_domain" to challenge.dnsDomain.orEmpty(),
             "dns_forest" to challenge.dnsForest.orEmpty(),
             "os_version" to challenge.osVersion.orEmpty(),
+            "os_version_is_claim" to challenge.osVersionIsCompatibilityClaim.toString(),
             "domain_joined" to challenge.isDomainJoined.toString(),
-        ),
+        ).filterValues { it.isNotBlank() },
     )
 
     private companion object {

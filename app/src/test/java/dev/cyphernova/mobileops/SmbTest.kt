@@ -272,16 +272,20 @@ class SmbTest {
     }
 
     @Test
-    fun `a version with no build number is reported as a claim rather than a windows release`() {
-        val osVersion = Ntlm.parseChallenge(sambaChallenge)!!.osVersion!!
-        assertTrue(osVersion.contains("6.1"))
-        assertFalse("must not read as a real Windows build", osVersion.contains("build 0"))
-        assertTrue(osVersion.contains("Samba"))
+    fun `a version with no build number is flagged as a claim rather than a windows release`() {
+        val challenge = Ntlm.parseChallenge(sambaChallenge)!!
+        // The field stays a value; the caveat is a flag, so nothing has to parse prose back out.
+        assertEquals("6.1", challenge.osVersion)
+        assertTrue(challenge.osVersionIsCompatibilityClaim)
+        assertTrue(challenge.describe().contains("no build number"))
     }
 
     @Test
     fun `a real windows build number is reported as one`() {
-        assertEquals("10.0 build 20348", Ntlm.parseChallenge(sessionSetupChallenge)!!.osVersion)
+        val challenge = Ntlm.parseChallenge(sessionSetupChallenge)!!
+        assertEquals("10.0 build 20348", challenge.osVersion)
+        assertFalse(challenge.osVersionIsCompatibilityClaim)
+        assertFalse(challenge.describe().contains("no build number"))
     }
 
     @Test
