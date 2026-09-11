@@ -12,8 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import dev.cyphernova.mobileops.core.tls.InspectionTls
 import javax.net.ssl.SSLSocket
-import javax.net.ssl.SSLSocketFactory
 
 /**
  * Inspects the TLS a host actually negotiates: protocol version, cipher suite, certificate
@@ -53,11 +53,12 @@ class TlsAuditModule : PentestModule {
                         severity = Severity.INFO,
                         title = "TLS handshake failed on $host:$port",
                         subject = "$host:$port",
-                        detail = "The handshake did not complete. On a LAN appliance the usual cause " +
-                            "is a self-signed or expired certificate this device will not trust, " +
-                            "not an absent service — the web exposure module uses a permissive " +
-                            "client and will still reach it. A closed port or a plaintext service " +
-                            "produces the same result here.",
+                        detail = "No TLS handshake completed, and the certificate is not the " +
+                            "reason: this audit accepts any chain so that it can examine one. " +
+                            "That leaves a closed port, a service speaking plaintext on a port " +
+                            "that looks like TLS, or a device that refused the protocols on " +
+                            "offer — the last of which is itself worth a look, since it means " +
+                            "nothing modern would connect to it either.",
                     ),
                 )
                 return@forEach
@@ -110,8 +111,25 @@ class TlsAuditModule : PentestModule {
         val daysUntilExpiry: Long,
         val signatureAlgorithm: String,
         val selfSigned: Boolean,
+        /** Whether a real client, validating normally, would have accepted this chain. */
+        val trustedByPlatform: Boolean,
     ) {
         fun issues(): List<SecurityIssue> = buildList {
+            // Asked here rather than allowed to abort the handshake: a chain no client trusts is
+            // the finding. On an admin interface it also trains everyone who uses it to click
+            // through a certificate warning, which is what makes interception work later.
+            if (!trustedByPlatform && !selfSigned) {
+                add(
+                    SecurityIssue(
+                        Severity.MEDIUM,
+                        "Certificate would be rejected by a normal client",
+                        "The chain does not validate against the platform trust store, and it is " +
+                            "not simply self-signed — an incomplete chain or an expired " +
+                            "intermediate produces this. Every user of this interface is being " +
+                            "taught to click through the warning.",
+                    ),
+                )
+            }
             if (protocol in LEGACY_PROTOCOLS) {
                 add(
                     SecurityIssue(
@@ -171,9 +189,18 @@ class TlsAuditModule : PentestModule {
         }
     }
 
+    /**
+     * Completes a handshake in order to look at the certificate.
+     *
+     * The default factory validates, and a LAN appliance's certificate is self-signed, so it
+     * threw on every host this module exists to audit — reporting "handshake failed" and leaving
+     * the protocol, signature, expiry and self-signed findings below as unreachable code. The
+     * handshake is completed permissively and whether a real client would have trusted the chain
+     * is then asked separately, because that is the finding rather than a reason to stop.
+     */
     private suspend fun handshake(host: String, port: Int): TlsResult? = withContext(Dispatchers.IO) {
         runCatching {
-            val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
+            val factory = InspectionTls.socketFactory
             (factory.createSocket() as SSLSocket).use { socket ->
                 socket.soTimeout = HANDSHAKE_TIMEOUT_MS
                 socket.connect(java.net.InetSocketAddress(host, port), HANDSHAKE_TIMEOUT_MS)
@@ -193,6 +220,7 @@ class TlsAuditModule : PentestModule {
                     daysUntilExpiry = TimeUnit.MILLISECONDS.toDays(msUntilExpiry),
                     signatureAlgorithm = leaf.sigAlgName,
                     selfSigned = leaf.subjectX500Principal == leaf.issuerX500Principal,
+                    trustedByPlatform = InspectionTls.isTrustedByPlatform(chain),
                 )
             }
         }.getOrNull()

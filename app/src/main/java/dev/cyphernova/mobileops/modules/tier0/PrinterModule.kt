@@ -78,17 +78,20 @@ class PrinterModule : PentestModule {
                 emit(ippSilentFinding(host, ipp.attempts))
             }
 
-            queryPjl(host)?.let { blocks ->
+            val pjl = queryPjl(host)
+            if (pjl.blocks.isNotEmpty()) {
                 spokeToThis = true
-                val model = Pjl.modelIn(blocks)
-                val settings = Pjl.settingsIn(blocks)
-                val files = Pjl.filesIn(blocks)
+                val model = Pjl.modelIn(pjl.blocks)
+                val settings = Pjl.settingsIn(pjl.blocks)
+                val files = Pjl.filesIn(pjl.blocks)
 
                 emit(pjlFinding(host, model, settings, files))
 
                 val concerns = Pjl.concerns(settings)
                 if (concerns.isNotEmpty()) emit(settingsFinding(host, concerns))
                 if (files.isNotEmpty()) emit(storageFinding(host, files))
+            } else if (pjl.stoppedAt != null) {
+                emit(pjlSilentFinding(host, pjl.stoppedAt))
             }
 
             if (spokeToThis) answered++
@@ -161,8 +164,15 @@ class PrinterModule : PentestModule {
         return IppResult(null, attempts)
     }
 
-    private suspend fun queryPjl(host: String): List<Pjl.Block>? = withContext(Dispatchers.IO) {
-        runCatching {
+    /** What the PJL query got, and why it got nothing when it did. */
+    private data class PjlResult(
+        val blocks: List<Pjl.Block> = emptyList(),
+        val stoppedAt: String? = null,
+    )
+
+    private suspend fun queryPjl(host: String): PjlResult = withContext(Dispatchers.IO) {
+        var stoppedAt: String? = null
+        val blocks = runCatching {
             Socket().use { socket ->
                 socket.connect(InetSocketAddress(host, PJL_PORT), CONNECT_TIMEOUT_MS)
                 socket.soTimeout = REQUEST_TIMEOUT_MS
@@ -181,13 +191,40 @@ class PrinterModule : PentestModule {
                         total += read
                     }
                 }
-                if (total == 0) return@use null
-                Pjl.parse(String(buffer, 0, total, Charsets.ISO_8859_1))
+                if (total == 0) {
+                    stoppedAt = "connected to 9100 and the printer sent nothing back"
+                    return@use emptyList()
+                }
+                val parsed = Pjl.parse(String(buffer, 0, total, Charsets.ISO_8859_1))
+                if (parsed.isEmpty()) {
+                    stoppedAt = "$total bytes came back that did not parse as PJL"
+                }
+                parsed
             }
-        }.getOrNull()?.takeIf { it.isNotEmpty() }
+        }.getOrElse { failure ->
+            // Same discipline as the IPP path: a refused port, a timeout and a reply that did not
+            // parse are three different next steps, and silence is none of them.
+            stoppedAt = failure.message ?: failure.javaClass.simpleName
+            emptyList()
+        }
+        PjlResult(blocks, stoppedAt)
     }
 
     // ---- Findings ------------------------------------------------------------------------------
+
+    private fun pjlSilentFinding(host: String, stoppedAt: String) = Finding(
+        moduleId = id,
+        observedAtEpochMs = System.currentTimeMillis(),
+        severity = Severity.INFO,
+        title = "PJL did not answer on $host",
+        subject = host,
+        detail = "Port 9100 was asked for the device inventory and gave nothing usable: " +
+            stoppedAt + ". A printer that refuses the connection is not serving a job socket; " +
+            "one that accepts it and stays silent has PJL disabled or is waiting for print data " +
+            "rather than commands. Either is worth knowing — it is the difference between a " +
+            "hardened device and one that was never asked.",
+        data = mapOf("host" to host, "stopped_at" to stoppedAt),
+    )
 
     private fun ippFinding(host: String, attributes: Ipp.Attributes) = Finding(
         moduleId = id,

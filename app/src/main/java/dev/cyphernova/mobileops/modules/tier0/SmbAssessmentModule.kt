@@ -84,7 +84,7 @@ class SmbAssessmentModule : PentestModule {
                 emit(nullSessionFinding(host, assessment.challenge))
                 if (assessment.shares.isNotEmpty()) {
                     weak++
-                    emit(shareFinding(host, assessment.shares))
+                    emit(shareFinding(host, assessment.shares, assessment.shareAccess))
                 } else {
                     // Reported rather than dropped: an empty share list and a refused enumeration
                     // look identical in a report, and only one of them is the server holding firm.
@@ -136,6 +136,8 @@ class SmbAssessmentModule : PentestModule {
         val nullSession: Boolean,
         val shares: List<SrvSvc.Share> = emptyList(),
         val shareLookupStoppedAt: String? = null,
+        /** Share name to what a tree connect as the null user got back. */
+        val shareAccess: Map<String, String> = emptyMap(),
     )
 
     private suspend fun assess(host: String): Assessment? = withContext(Dispatchers.IO) {
@@ -151,6 +153,7 @@ class SmbAssessmentModule : PentestModule {
         var nullSession = false
         var shares: List<SrvSvc.Share> = emptyList()
         var shareStop: String? = null
+        var shareAccess: Map<String, String> = emptyMap()
 
         runCatching {
             Socket().use { socket ->
@@ -187,12 +190,17 @@ class SmbAssessmentModule : PentestModule {
                     val attempt = enumerateShares(socket, host, sessionId)
                     shares = attempt.shares
                     shareStop = attempt.stoppedAt
+                    // Listing a share is not the same as reaching it. One tree connect each
+                    // settles which, as a fact rather than an inference from a comment field.
+                    if (shares.isNotEmpty()) {
+                        shareAccess = reachableShares(socket, host, sessionId, shares)
+                    }
                 }
             }
         }
 
         if (!smb1 && negotiated == null) return@withContext null
-        Assessment(port, smb1, negotiated, challenge, nullSession, shares, shareStop)
+        Assessment(port, smb1, negotiated, challenge, nullSession, shares, shareStop, shareAccess)
     }
 
     /** How far the share enumeration got, and what stopped it. */
@@ -263,6 +271,38 @@ class SmbAssessmentModule : PentestModule {
             )
         }
         return ShareAttempt(shares)
+    }
+
+    /**
+     * Which of the listed shares a caller with no credentials can actually attach to.
+     *
+     * Enumerating a share name and being allowed onto it are different things, and the
+     * difference is the whole finding: a share list is a disclosure, a share a stranger can
+     * mount is access. A tree connect answers it in one exchange and changes nothing.
+     *
+     * Administrative shares are skipped. They exist on every Windows host, they are expected to
+     * refuse, and asking produces a row of STATUS_ACCESS_DENIED that buries the one that did not.
+     */
+    private fun reachableShares(
+        socket: Socket,
+        host: String,
+        sessionId: Long,
+        shares: List<SrvSvc.Share>,
+    ): Map<String, String> {
+        var messageId = 10L
+        return shares
+            .filterNot { it.isAdministrative }
+            .associate { share ->
+                val reply = roundTrip(
+                    socket,
+                    Smb.smb2TreeConnectRequest(host, share.name, messageId++, sessionId),
+                )
+                share.name to when (val code = reply?.let { Smb.statusOf(it) }) {
+                    null -> "no reply"
+                    Smb.STATUS_SUCCESS -> ATTACHED
+                    else -> status(code)
+                }
+            }
     }
 
     /** An NTSTATUS by the name an assessor would look up, falling back to the number. */
@@ -437,85 +477,89 @@ class SmbAssessmentModule : PentestModule {
      * front of an owner: not "anonymous access is permitted" but "anonymous access lists these
      * shares, and these hold files".
      */
-    private fun shareFinding(host: String, shares: List<SrvSvc.Share>) = Finding(
-        moduleId = id,
-        observedAtEpochMs = System.currentTimeMillis(),
-        // A share that states its own access policy has already answered the question. Writable
-        // by anyone with no password is not "worth checking by hand" — it is the finding.
-        severity = when {
-            shares.any { SrvSvc.Access.ANONYMOUS_WRITE in it.declaredAccess } -> Severity.CRITICAL
-            shares.any { it.holdsFiles && !it.isAdministrative } -> Severity.CRITICAL
-            else -> Severity.MEDIUM
-        },
-        title = "Shares listed without credentials on $host",
-        subject = host,
-        detail = buildString {
-            append("A caller presenting no username and no password enumerated ")
-            append("${shares.size} share(s): ")
-            append(
-                shares.joinToString("; ") { share ->
-                    buildString {
-                        append(share.name)
-                        append(" (${share.kind}")
-                        if (share.isAdministrative) append(", administrative")
-                        append(")")
-                        if (share.remark.isNotBlank()) append(" \"${share.remark}\"")
-                    }
-                },
-            )
-            append(". ")
+    private fun shareFinding(
+        host: String,
+        shares: List<SrvSvc.Share>,
+        access: Map<String, String>,
+    ): Finding {
+        val attached = shares.filter { access[it.name] == ATTACHED }
+        val writable = shares.filter { SrvSvc.Access.ANONYMOUS_WRITE in it.declaredAccess }
+        val refused = shares.filter { it.name in access && access[it.name] != ATTACHED }
 
-            val writable = shares.filter { SrvSvc.Access.ANONYMOUS_WRITE in it.declaredAccess }
-            val readable = shares.filter {
-                SrvSvc.Access.ANONYMOUS_READ in it.declaredAccess &&
-                    SrvSvc.Access.ANONYMOUS_WRITE !in it.declaredAccess
-            }
-            val files = shares.filter { it.holdsFiles && !it.isAdministrative }
-
-            when {
-                writable.isNotEmpty() -> append(
-                    "${writable.joinToString { it.name }} declares in its own comment that it is " +
-                        "both readable and writable with no password. That is the server stating " +
-                        "its permissions, not an inference: anyone on this segment can read what " +
-                        "is on it and write to it. On the device that routes for the segment, a " +
-                        "writable share is also somewhere to put a file and wait for someone to " +
-                        "open it. Client isolation is not in effect here, so every device on the " +
-                        "network can reach it.",
+        return Finding(
+            moduleId = id,
+            observedAtEpochMs = System.currentTimeMillis(),
+            // Attaching is proof. A declared write policy is the server's own word for it. Either
+            // is the finding; a list of names the server then refused is not.
+            severity = when {
+                attached.isNotEmpty() || writable.isNotEmpty() -> Severity.CRITICAL
+                else -> Severity.MEDIUM
+            },
+            title = if (attached.isEmpty()) {
+                "Shares listed without credentials on $host"
+            } else {
+                "Shares reachable without credentials on $host"
+            },
+            subject = host,
+            detail = buildString {
+                append("A caller presenting no username and no password enumerated ")
+                append("${shares.size} share(s): ")
+                append(
+                    shares.joinToString("; ") { share ->
+                        buildString {
+                            append(share.name)
+                            append(" (${share.kind}")
+                            if (share.isAdministrative) append(", administrative")
+                            access[share.name]?.let { append(", $it") }
+                            append(")")
+                            if (share.remark.isNotBlank()) append(" \"${share.remark}\"")
+                        }
+                    },
                 )
+                append(". ")
 
-                readable.isNotEmpty() -> append(
-                    "${readable.joinToString { it.name }} declares in its own comment that it is " +
-                        "readable with no password, so its contents are available to anyone on " +
-                        "this segment.",
-                )
-
-                files.isNotEmpty() -> append(
-                    "${files.joinToString { it.name }} hold files, and the names, layout and " +
-                        "comments are already disclosed. None of them states its access policy, " +
-                        "so whether the contents can be read is the next thing to establish.",
-                )
-
-                else -> append(
-                    "None of these is a file share, so the disclosure is the list itself: it " +
-                        "names the machine's role and gives an attacker the share names to aim " +
-                        "credentials at.",
-                )
-            }
-        },
-        data = mapOf(
-            "host" to host,
-            "share_count" to shares.size.toString(),
-            "shares" to shares.joinToString { it.name },
-            "file_shares" to shares.filter { it.holdsFiles && !it.isAdministrative }
-                .joinToString { it.name },
-            "anonymous_write" to shares
-                .filter { SrvSvc.Access.ANONYMOUS_WRITE in it.declaredAccess }
-                .joinToString { it.name },
-            "anonymous_read" to shares
-                .filter { SrvSvc.Access.ANONYMOUS_READ in it.declaredAccess }
-                .joinToString { it.name },
-        ).filterValues { it.isNotBlank() },
-    )
+                if (attached.isNotEmpty()) {
+                    append(
+                        "The session attached to ${attached.joinToString { it.name }} — that is " +
+                            "not an inference from a name or a comment, it is the server " +
+                            "granting a tree connect to a caller with no credentials. ",
+                    )
+                }
+                if (writable.isNotEmpty()) {
+                    append(
+                        "${writable.joinToString { it.name }} states in its own comment that it " +
+                            "is writable with no password, so this is somewhere to leave a file " +
+                            "as well as somewhere to read one. ",
+                    )
+                }
+                if (attached.isNotEmpty() || writable.isNotEmpty()) {
+                    append(
+                        "Client isolation is not in effect on this segment, so every device on " +
+                            "the network can reach it.",
+                    )
+                } else if (refused.isNotEmpty()) {
+                    append(
+                        "The server refused a tree connect to all of them " +
+                            "(${refused.joinToString { "${it.name}: ${access[it.name]}" }}), so " +
+                            "the disclosure is the list itself: it names the machine's role and " +
+                            "gives an attacker the share names to aim credentials at.",
+                    )
+                } else {
+                    append(
+                        "None of these is a file share, so the disclosure is the list itself.",
+                    )
+                }
+            },
+            data = mapOf(
+                "host" to host,
+                "share_count" to shares.size.toString(),
+                "shares" to shares.joinToString { it.name },
+                "attached" to attached.joinToString { it.name },
+                "anonymous_write" to writable.joinToString { it.name },
+                "access" to access.entries.joinToString { "${it.key}=${it.value}" },
+            ).filterValues { it.isNotBlank() },
+        )
+    }
 
     /**
      * Why the share list is absent.
@@ -601,6 +645,9 @@ class SmbAssessmentModule : PentestModule {
          * not fix it.
          */
         const val MAX_PENDING_REPLIES = 4
+
+        /** The one tree-connect outcome that means a stranger is on the share. */
+        const val ATTACHED = "attached"
         const val READ_TIMEOUT_MS = 5_000
 
         /** A negotiate or session setup is a few hundred bytes; anything vast is not one. */

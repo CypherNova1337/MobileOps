@@ -86,7 +86,10 @@ class IotDiscoveryModule : PentestModule {
 
             identified++
             if (verdict.fragility != IotPorts.Fragility.ROBUST) equipment++
-            emit(deviceFinding(host, verdict, open, probed))
+            // The port scan already files a verdict for every host from the same pooled
+            // evidence. Repeating it here when nothing was learned puts the same paragraph in
+            // the report twice; it is only worth saying when a protocol actually answered.
+            if (probed.findings > 0) emit(deviceFinding(host, verdict, open, probed))
         }
 
         return when {

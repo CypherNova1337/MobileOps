@@ -211,9 +211,13 @@ class PortScanModule : PentestModule {
         445, 139 -> "SMB exposed on the LAN. Run the SMB exposure module against this host for " +
             "the signing policy, whether SMB1 is still enabled, and whether it accepts a null " +
             "session."
-        3389 -> "RDP exposed; confirm NLA is required."
+        // Not "confirm NLA is required": stating what the exposure is beats instructing the
+        // operator to go and establish it, and this module cannot establish it from a port.
+        3389 -> "RDP exposed on the LAN. Where Network Level Authentication is off, the logon " +
+            "screen itself is reachable pre-authentication."
         5900 -> "VNC often ships without transport encryption."
-        80, 8080, 8000 -> "Cleartext HTTP; confirm whether it redirects to TLS."
+        80, 8080, 8000 -> "Cleartext HTTP. The web exposure module reports whether it redirects " +
+            "to TLS, what it serves, and whether it asks for a credential."
         else -> null
     }
 
