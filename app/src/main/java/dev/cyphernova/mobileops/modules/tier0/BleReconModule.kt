@@ -39,7 +39,7 @@ class BleReconModule : PentestModule {
             "Entirely passive and needs no network. Reveals what is physically present."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.PASSIVE
-    override val category = ModuleCategory.WIRELESS
+    override val category = ModuleCategory.RADIO
 
     override val requiredPermissions: List<String>
         get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

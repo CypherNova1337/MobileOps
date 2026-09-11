@@ -170,10 +170,16 @@ walking around or on cellular:
 | Works anywhere | Needs a local subnet |
 | --- | --- |
 | **RF site survey** — every AP in range, vendors, channel congestion, security census | Host discovery |
-| **BLE reconnaissance** — every advertising device in range, named and attributed | |
-| WiFi survey and beacon elements — scanning does not require associating | Service & name discovery |
-| Rogue AP correlation | Port scan, TLS audit |
-| Device identity audit | Web exposure, credentials, WPS registrar |
+| **Network name intelligence** — factory SSIDs, ISP equipment, device types, personal names | Service & name discovery |
+| **Geolocated survey** — coverage mapped to GPS, exported as WiGLE CSV | Port scan, TLS audit |
+| **WPS default PIN derivation** — the sticker PIN computed from the BSSID | Web exposure, credentials |
+| **BLE reconnaissance** — every advertising device in range, named and attributed | WPS registrar attack |
+| **Classic Bluetooth discovery** — discoverable devices and what they are | |
+| **Cellular survey** — operators, generations, serving-cell baseline, 2G exposure | |
+| **802.11mc ranging** — true distance in metres to APs that support it | |
+| WiFi survey and beacon elements — scanning does not require associating | |
+| Rogue AP correlation | |
+| Device identity audit | |
 | Traffic capture and TLS interception — these work fine over cellular | |
 
 `t0.wifi.sitesurvey` is the module built for this. It repeats the scan four times — matching the
@@ -181,6 +187,27 @@ platform's per-window allowance rather than fighting it — and aggregates every
 from the BSSID prefix, 2.4 GHz channel overlap, a security census, and signal range per AP across
 the sweep. APs worth a second look (open, WEP, WPS, or a randomised BSSID, which infrastructure
 never has) get their own finding; the rest stay in the census so the report stays readable.
+
+Where it stops being a survey and starts being reconnaissance is the analysis stacked on top.
+`t0.wifi.ssidintel` reads the names for unchanged factory SSIDs and the vendor behind each,
+`t0.wifi.survey` computes the likely default WPS PIN from every WPS-advertising BSSID, and
+`t0.wifi.wardrive` attaches coordinates so the whole thing becomes a coverage map rather than a
+list. All of it happens before there is any route to the network — so by the time there is one,
+the candidate PINs are already computed and the registrar attack is a handful of attempts.
+
+Beyond WiFi, the other radios answer without a network too: `t0.ble.recon` and `t0.bt.classic`
+inventory what is physically present over Bluetooth, and `t0.cell.survey` works where there is no
+wireless network at all.
+
+### A note on what Android reports as WEP
+
+The platform builds its capability string from the beacon, and emits `[WEP]` for any AP that sets
+the privacy bit without an RSN or WPA element — which is what WEP meant in 2003. It is rarely
+what it means now. WEP was struck from 802.11 in 2012 and cannot be used with HT, VHT or HE data
+rates at all, so a 5 GHz 802.11ac radio advertising it is a contradiction; what it actually
+indicates is a link running something other than 802.11i, usually a mesh backhaul or a Wi-Fi
+Direct group owner. The analyser checks the beacon's own rate elements and reports those as
+`Privacy set, no RSN` rather than raising a critical finding on a network nobody can join.
 
 A carrier link hands out a /32, which is point-to-point: no neighbours, nothing to sweep. The LAN
 modules detect that and say so rather than reporting a subnet that does not exist.
@@ -222,12 +249,21 @@ scattered among usable ones.
 
 
 **Tier 0 — passive**
-- `t0.ble.recon` — enumerates BLE devices in range: names, vendors, item trackers, advertised
-  services. Entirely passive, needs no network, reveals what is physically present.
-- `t0.wifi.join` — associates this app with a selected network without changing the phone's own
-  connection, so the LAN modules can run against it. Run again to disconnect.
 - `t0.wifi.sitesurvey` — repeated sweep of the whole RF environment: every AP in range, vendors,
   channel congestion, security census. Needs no network of any kind.
+- `t0.wifi.ssidintel` — reads every network name in range for what it gives away: unchanged
+  factory SSIDs and the vendor behind them, ISP-supplied equipment, device types, disclosed
+  network roles, personal names. Pure offline analysis.
+- `t0.wifi.wardrive` — logs every AP heard against GPS position over a rolling sweep and writes a
+  WiGLE-format CSV. Walk a perimeter with it running to map where a network is audible from
+  outside the building.
+- `t0.ble.recon` — enumerates BLE devices in range: names, vendors, item trackers, advertised
+  services. Entirely passive, needs no network, reveals what is physically present.
+- `t0.cell.survey` — enumerates every cellular cell the modem can hear: operators, generations,
+  identifiers and signal. Records the serving cell as a baseline, and flags a live 2G carrier,
+  which does not authenticate the network to the handset. Needs no WiFi and no data session.
+- `t0.wifi.join` — associates this app with a selected network without changing the phone's own
+  connection, so the LAN modules can run against it. Run again to disconnect.
 - `t0.wifi.survey` — grades each AP's advertised security: encryption suite, WPS exposure,
   802.11w management frame protection, hidden SSIDs. Audits the selected networks, or everything
   in range when nothing is selected.
@@ -241,6 +277,13 @@ scattered among usable ones.
 - `t0.tls.intercept` — arms TLS interception and manages the local CA. Run again to disarm.
 
 **Tier 0 — active**
+- `t0.bt.classic` — inquiry scan for discoverable classic Bluetooth devices, decoding the Class
+  of Device into what each one is and which services it carries. Finds the laptops, printers and
+  car kits BLE scanning cannot see. A device answering here has been left discoverable, which is
+  the finding.
+- `t0.wifi.rtt` — measures true distance in metres to APs supporting 802.11mc fine timing
+  measurement. No association involved; two readings from different positions locate a rogue AP
+  physically, which RSSI cannot do.
 - `t0.net.services` — resolves names and services over NetBIOS, mDNS and SSDP: the announcements
   devices already make. Fills in the names reverse DNS cannot.
 - `t0.net.discovery` — subnet sweep via ICMP echo plus TCP connect probes. Caps at a /22, because
@@ -253,8 +296,10 @@ scattered among usable ones.
   version control, version-disclosing banners, missing security headers. GET requests only.
 - `t0.exploit.defaultcreds` — tests vendor default credentials against HTTP Basic auth. Stops at
   the first pair that works.
-- `t0.exploit.wpsregistrar` — tests whether the WPS External Registrar answers unauthenticated
-  over UPnP. The one WPS attack surface reachable without monitor mode.
+- `t0.exploit.wpsregistrar` — attacks the WPS External Registrar over UPnP. Tries unauthenticated
+  settings retrieval, then the full M1-M8 registrar exchange with PINs derived from the AP's own
+  MAC address, then finishes a half-recovered PIN. Recovers the WPA passphrase where it works.
+  The one WPS attack surface reachable without monitor mode.
 
 **Tier 1**
 - `t1.capture.pcap` — tcpdump on a live interface. Managed mode, so this sees the device's own
@@ -279,8 +324,20 @@ exploit modules are scoped to what proves a finding and stops:
   vendor's form differs and submitting guesses blind risks locking the account.
 - **Web exposure** is read-only: every request is a GET, so nothing changes state on the target.
   What is reachable is the whole proof.
+- **WPS** is taken all the way to the passphrase. `t0.wifi.survey` computes the likely default
+  PINs from a BSSID off-network — a long line of firmware generated the sticker PIN from the MAC
+  with a published function — and `t0.exploit.wpsregistrar` tests them by running the registrar
+  protocol over UPnP. The protocol validates each half of the PIN separately and says which one
+  failed, so a candidate that fails at M6 rather than M4 has already given up the first four
+  digits, leaving a thousand-guess remainder that the module finishes in the same run. Where the
+  exchange completes, M7 carries the AP's live configuration and the network key comes back in
+  clear.
 
-Both stop at demonstration. Neither pivots, persists, or modifies the target.
+  The exchange is deliberately aborted with a NACK after M7. A real M8 pushes *new* settings onto
+  the AP, so completing the protocol properly would reconfigure the network under test; aborting
+  leaves it exactly as it was found.
+
+These stop at demonstration. None pivots, persists, or modifies the target.
 
 ### WiFi attacks and what a phone can reach
 
@@ -292,7 +349,8 @@ mode and injection — Tier 2, and unreachable on a stock handset at any tier be
 | Deauthentication | Injection | No |
 | WPA handshake capture | Monitor mode | No |
 | PMKID capture | Injection | No |
-| WPS PIN / Pixie Dust over the air | Injection | No |
+| WPS PIN / Pixie Dust over the air | Injection | No — but see WPS over UPnP below |
+| Online WPA2 passphrase guessing | Silent association attempts | No — `WifiNetworkSpecifier` raises a system dialog per attempt |
 | Evil twin / karma | SoftAP with a chosen SSID | No — the platform picks the SSID |
 
 The exception is **WPS over UPnP**. The Wi-Fi Alliance defined the External Registrar protocol

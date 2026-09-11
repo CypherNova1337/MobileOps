@@ -87,6 +87,17 @@ class WifiRadio(context: Context) {
     @SuppressLint("MissingPermission")
     fun requestScan(): Boolean = runCatching { wifiManager.startScan() }.getOrDefault(false)
 
+    /**
+     * The platform's own scan objects, unflattened.
+     *
+     * Ranging is the one caller that needs these: `RangingRequest` takes [ScanResult] instances
+     * and reads fields off them that [ApObservation] does not carry, so handing it a rebuilt
+     * object would not work.
+     */
+    @SuppressLint("MissingPermission")
+    fun latestRawResults(): List<ScanResult> =
+        runCatching { wifiManager.scanResults.orEmpty() }.getOrDefault(emptyList())
+
     @SuppressLint("MissingPermission")
     @Suppress("DEPRECATION")
     fun latestResults(): List<ApObservation> =

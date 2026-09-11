@@ -12,7 +12,11 @@ package dev.cyphernova.mobileops.core.module
 enum class ModuleCategory(val label: String, val blurb: String) {
     WIRELESS(
         label = "Wireless",
-        blurb = "The air around you. Needs no network of any kind.",
+        blurb = "WiFi in the air around you. Needs no network of any kind.",
+    ),
+    RADIO(
+        label = "Other radios",
+        blurb = "Cellular, Bluetooth and ranging. Works where there is no WiFi at all.",
     ),
     NETWORK(
         label = "Network discovery",

@@ -2,11 +2,16 @@ package dev.cyphernova.mobileops.core.module
 
 import dev.cyphernova.mobileops.modules.tier0.DefaultCredentialModule
 import dev.cyphernova.mobileops.modules.tier0.BleReconModule
+import dev.cyphernova.mobileops.modules.tier0.BluetoothClassicModule
+import dev.cyphernova.mobileops.modules.tier0.CellularSurveyModule
 import dev.cyphernova.mobileops.modules.tier0.HostDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.NetworkJoinModule
 import dev.cyphernova.mobileops.modules.tier0.IdentityAuditModule
 import dev.cyphernova.mobileops.modules.tier0.PortScanModule
 import dev.cyphernova.mobileops.modules.tier0.RogueApModule
+import dev.cyphernova.mobileops.modules.tier0.RttRangingModule
+import dev.cyphernova.mobileops.modules.tier0.SsidIntelModule
+import dev.cyphernova.mobileops.modules.tier0.WardriveModule
 import dev.cyphernova.mobileops.modules.tier0.SiteSurveyModule
 import dev.cyphernova.mobileops.modules.tier0.ServiceDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.TlsAuditModule
@@ -28,9 +33,14 @@ object ModuleRegistry {
     val all: List<PentestModule> = listOf(
         SiteSurveyModule(),
         WifiSurveyModule(),
+        SsidIntelModule(),
         RogueApModule(),
-        BleReconModule(),
+        WardriveModule(),
         NetworkJoinModule(),
+        BleReconModule(),
+        BluetoothClassicModule(),
+        CellularSurveyModule(),
+        RttRangingModule(),
         HostDiscoveryModule(),
         ServiceDiscoveryModule(),
         PortScanModule(),

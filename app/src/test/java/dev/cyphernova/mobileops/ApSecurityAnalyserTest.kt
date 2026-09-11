@@ -20,6 +20,47 @@ class ApSecurityAnalyserTest {
             rssiDbm = -50,
         )
 
+    /**
+     * Android reports any AP that sets the privacy bit with no RSN or WPA element as `[WEP]`.
+     * On a 5 GHz or HT-capable radio that cannot be what it is — WEP is not usable with those
+     * data rates — so the verdict is corrected rather than reported as a critical finding.
+     */
+    @Test
+    fun `privacy without rsn on a modern radio is not called wep`() {
+        val fiveGhz = ApSecurityAnalyser.analyse(ap("[WEP][ESS]", frequency = 5765))
+        assertEquals(Encryption.PRIVACY_NO_RSN, fiveGhz.encryption)
+        assertTrue(fiveGhz.issues.none { it.severity == Severity.CRITICAL })
+        assertTrue(fiveGhz.issues.any { it.title.contains("Privacy bit") })
+    }
+
+    @Test
+    fun `ht capability rules out wep on 2 point 4 as well`() {
+        val observation = ApObservation(
+            ssid = "Backhaul",
+            bssid = "62:45:B8:E9:50:73",
+            capabilities = "[WEP][ESS]",
+            frequencyMhz = 2437,
+            rssiDbm = -60,
+            // Element 45 is HT Capabilities; WEP is not permitted with 802.11n rates.
+            informationElements = listOf(45 to ByteArray(26)),
+        )
+        assertEquals(Encryption.PRIVACY_NO_RSN, ApSecurityAnalyser.analyse(observation).encryption)
+    }
+
+    @Test
+    fun `genuine legacy wep is still reported as critical`() {
+        val legacy = ApSecurityAnalyser.analyse(ap("[WEP][ESS]", frequency = 2437))
+        assertEquals(Encryption.WEP, legacy.encryption)
+        assertTrue(legacy.issues.any { it.severity == Severity.CRITICAL })
+    }
+
+    /** A non-802.11i link has no management frame protection to be missing. */
+    @Test
+    fun `the pmf note is suppressed for a non-standard privacy link`() {
+        val profile = ApSecurityAnalyser.analyse(ap("[WEP][ESS]", frequency = 5765))
+        assertTrue(profile.issues.none { it.title.contains("management frame") })
+    }
+
     @Test
     fun `open network is flagged high`() {
         val profile = ApSecurityAnalyser.analyse(ap("[ESS]"))

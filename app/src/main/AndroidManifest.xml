@@ -47,6 +47,14 @@
         android:name="android.hardware.wifi"
         android:required="true" />
 
+    <!--
+      802.11mc ranging is a chipset capability, not a software one. Optional so the app still
+      installs on handsets without it; the module reports the gap rather than hiding.
+    -->
+    <uses-feature
+        android:name="android.hardware.wifi.rtt"
+        android:required="false" />
+
     <!-- Optional: used to detect an external WiFi adapter on the USB bus. -->
     <uses-feature
         android:name="android.hardware.usb.host"
