@@ -73,9 +73,10 @@ class TlsInterceptModule : PentestModule {
                 severity = Severity.INFO,
                 title = "TLS interception armed",
                 subject = CertificateAuthority.CA_COMMON_NAME,
-                detail = "Local CA ready at ${authority.exportedCertificateFile.absolutePath}. " +
-                    "Share it from the Evidence tab, then install it under Settings → Security → " +
-                    "Encryption & credentials → Install a certificate → CA certificate.\n\n" +
+                detail = "Local CA ready. Tap 'Install CA' on this card to hand it straight to the " +
+                    "system certificate installer. If the installer sends you to Settings instead, " +
+                    "the PEM is at ${authority.exportedCertificateFile.absolutePath} and can be " +
+                    "shared from the Evidence tab.\n\n" +
                     trustStoreNote(authority),
                 data = mapOf(
                     "ca_sha256" to fingerprint,

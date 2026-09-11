@@ -135,6 +135,11 @@ as designed rather than a limitation to route around. What that means in practic
 | CA installed in the **system** store (root) | Everything except apps that pin |
 | Certificate-pinning apps | Nothing, at any tier, by design |
 
+Installing the CA is one tap: the interception card hands the certificate straight to the system
+installer via `KeyChain.createInstallIntent()`. Some Android releases route CA installation
+through Settings regardless, in which case the app says so and opens the right screen rather than
+failing quietly.
+
 The middle row is the one that surprises people: since Android 7, apps trust user-installed CAs
 only if their network security config opts in, and almost none do. So a user-installed CA is a
 browser-traffic tool. `t0.tls.intercept` reports the exact filename the system store keys on

@@ -250,6 +250,19 @@ class MobileOpsViewModel(application: Application) : AndroidViewModel(applicatio
         File(File(getApplication<Application>().filesDir, "tls"), "MobileOps-CA.pem")
             .takeIf { it.exists() }
 
+    /**
+     * The CA as raw DER, which is what the system certificate installer expects — it takes the
+     * certificate bytes directly rather than a file path.
+     */
+    fun caCertificateDer(): ByteArray? {
+        val pem = caCertificateFile()?.readText() ?: return null
+        val body = pem.substringAfter("-----BEGIN CERTIFICATE-----", "")
+            .substringBefore("-----END CERTIFICATE-----", "")
+            .replace(Regex("\\s"), "")
+        if (body.isBlank()) return null
+        return runCatching { java.util.Base64.getDecoder().decode(body) }.getOrNull()
+    }
+
     private companion object {
         const val SCAN_SETTLE_MS = 2_500L
     }

@@ -26,7 +26,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.provider.Settings
 import android.net.VpnService
+import android.security.KeyChain
+import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import dev.cyphernova.mobileops.core.module.Intrusiveness
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
@@ -198,6 +202,45 @@ private fun ModuleCard(state: ModuleState, viewModel: MobileOpsViewModel) {
                     }
                 }
 
+                if (module.id == INTERCEPT_MODULE_ID && viewModel.caCertificateDer() != null) {
+                    OutlinedButton(
+                        onClick = {
+                            val der = viewModel.caCertificateDer()
+                            if (der == null) {
+                                Toast.makeText(context, "No CA yet — run the module first", Toast.LENGTH_SHORT).show()
+                                return@OutlinedButton
+                            }
+
+                            // The system certificate installer takes the DER bytes directly, so
+                            // this hands the certificate straight to it rather than making the
+                            // operator find a file and navigate Settings by hand.
+                            val install = KeyChain.createInstallIntent().apply {
+                                putExtra(KeyChain.EXTRA_CERTIFICATE, der)
+                                putExtra(KeyChain.EXTRA_NAME, "MobileOps Interception CA")
+                            }
+
+                            val launched = runCatching {
+                                context.startActivity(install)
+                                true
+                            }.getOrDefault(false)
+
+                            if (!launched) {
+                                // Some releases route CA installation through Settings rather than
+                                // letting an app hand it over. Land the operator in the right place
+                                // instead of failing silently.
+                                Toast.makeText(
+                                    context,
+                                    "Install from Settings → Security → Encryption & credentials",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                runCatching {
+                                    context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                                }
+                            }
+                        },
+                    ) { Text("Install CA") }
+                }
+
                 if (state.running) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 }
@@ -208,3 +251,6 @@ private fun ModuleCard(state: ModuleState, viewModel: MobileOpsViewModel) {
 
 /** The capture module is the one card with extra controls, so its id is named here. */
 private const val CAPTURE_MODULE_ID = "t0.capture.vpn"
+
+/** The interception card carries a one-tap installer for the CA it generates. */
+private const val INTERCEPT_MODULE_ID = "t0.tls.intercept"
