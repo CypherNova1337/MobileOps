@@ -60,7 +60,11 @@ object LocalNetwork {
     fun position(context: Context): NetworkPosition? {
         val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return null
-        val network = manager.activeNetwork ?: return null
+        // The process-bound network wins where one is set. After a per-app association the
+        // handset's *active* network is still whatever it was — frequently cellular — so reading
+        // activeNetwork reported a carrier address on rmnet for a device that had just joined
+        // the WiFi under test, and every LAN module would have aimed at the wrong interface.
+        val network = manager.boundNetworkForProcess ?: manager.activeNetwork ?: return null
         val properties = manager.getLinkProperties(network) ?: return null
 
         val capabilities = manager.getNetworkCapabilities(network)

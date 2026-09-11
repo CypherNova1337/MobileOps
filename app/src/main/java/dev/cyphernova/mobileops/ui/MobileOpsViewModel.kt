@@ -22,6 +22,7 @@ import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.ModuleRegistry
 import dev.cyphernova.mobileops.core.module.ModuleRunner
 import dev.cyphernova.mobileops.core.module.PentestModule
+import dev.cyphernova.mobileops.core.target.HostHarvest
 import dev.cyphernova.mobileops.core.target.Target
 import dev.cyphernova.mobileops.core.target.TargetSelection
 import dev.cyphernova.mobileops.modules.tier0.WifiRadio
@@ -88,15 +89,7 @@ class MobileOpsViewModel(application: Application) : AndroidViewModel(applicatio
         evidenceStore.findings,
         _manualHosts,
     ) { findings, manual ->
-        val swept = findings
-            .filter { it.moduleId == "t0.net.discovery" && it.title.startsWith("Live host") }
-            .map { finding ->
-                Target.Host(
-                    address = finding.subject,
-                    hostname = finding.data["hostname"]?.takeIf { it.isNotBlank() },
-                )
-            }
-        (manual + swept).distinctBy { it.address }
+        (manual + HostHarvest.hostsIn(findings)).distinctBy { it.address }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val selection: StateFlow<TargetSelection> = combine(
