@@ -126,7 +126,7 @@ class WifiAssessmentModule : PentestModule {
             .sortedBy { it.viability.rank }
         val open = routes.count { it.viability == AttackPath.Viability.OPEN }
 
-        emit(verdictFinding(ap, radios, profile, target, routes, open, lanAccess))
+        emit(verdictFinding(context, ap, radios, profile, target, routes, open, lanAccess))
         EnterpriseWifi.assess(posture).forEach { note -> emit(enterpriseFinding(ap, note)) }
 
         // The routes that are not open are the useful half of the answer — they say what would
@@ -233,6 +233,7 @@ class WifiAssessmentModule : PentestModule {
     }
 
     private fun verdictFinding(
+        context: ModuleContext,
         ap: ApObservation,
         radios: List<ApObservation>,
         profile: SecurityProfile,
@@ -289,6 +290,12 @@ class WifiAssessmentModule : PentestModule {
                 routes.count { it.viability == AttackPath.Viability.NEEDS_CAPTURE }.toString(),
             "have_capture" to target.haveCapture.toString(),
             "have_lan_access" to lanAccess.name,
+            // What the platform actually said, so a wrong verdict can be diagnosed from the
+            // report rather than by guessing at it.
+            "lan_reported_ssid" to currentWifiIdentity(context.androidContext)?.ssid.orEmpty(),
+            "lan_reported_bssid" to currentWifiIdentity(context.androidContext)?.bssid.orEmpty(),
+            "lan_local_cidr" to (LocalNetwork.position(context.androidContext)?.cidr ?: ""),
+            "lan_transport" to (LocalNetwork.position(context.androidContext)?.transport?.name ?: ""),
             "pmf_required" to target.managementFrameProtectionRequired.toString(),
         ),
     )
@@ -374,9 +381,11 @@ class WifiAssessmentModule : PentestModule {
     private fun lanAccessTo(context: Context, ssid: String, bssid: String): LanAccess {
         val name = currentWifiIdentity(context)
         val position = LocalNetwork.position(context)
-        val onWifiSubnet = position != null &&
-            position.hasLocalSubnet &&
-            position.transport == Transport.WIFI
+        // hasLocalSubnet already rules out cellular and point-to-point links, which is the
+        // distinction that matters. Insisting on the WiFi transport on top of that was too
+        // strict — it reported NONE on a handset holding 192.168.61.20/24 on wlan0 — and a
+        // wired or tethered LAN is a LAN for the purposes of an IP-layer route anyway.
+        val onLocalSubnet = position != null && position.hasLocalSubnet
 
         return when {
             // A BSSID match is unambiguous; an SSID match is good enough.
@@ -386,7 +395,7 @@ class WifiAssessmentModule : PentestModule {
             // A name came back and it is a different network. That is a real negative.
             name != null && name.readable -> LanAccess.NONE
 
-            onWifiSubnet -> LanAccess.LIKELY
+            onLocalSubnet -> LanAccess.LIKELY
             else -> LanAccess.NONE
         }
     }

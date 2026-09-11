@@ -4,6 +4,7 @@ import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.exploit.HttpAnalysis
+import dev.cyphernova.mobileops.core.exploit.PathEvidence
 import dev.cyphernova.mobileops.core.module.Intrusiveness
 import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
@@ -116,16 +117,46 @@ class WebExposureModule : PentestModule {
                     )
                 }
 
-                // Baseline control. Ask for a path that cannot exist. If the device answers it
-                // with a 200, it answers everything with a 200, and every "exposed path" below
-                // would be the same page wearing different names — which is exactly what it
-                // looked like when nine unrelated paths all returned an identical 2489 bytes.
-                val baseline = LanHttpClient.probe("$base/$CONTROL_PATH")
-                val answersEverything = baseline != null &&
-                    baseline.isSuccess &&
-                    !HttpAnalysis.isSoftError(baseline)
+                // Baseline control. Ask for paths that cannot exist. A device that answers
+                // those with a 200 answers everything with a 200, and every "exposed path" below
+                // would be the same page wearing different names — which is what it looked like
+                // when nine unrelated paths all came back an identical 2489 bytes.
+                //
+                // Two of them, because one request that simply times out used to leave the
+                // baseline null, and the filter below was written to skip itself when that
+                // happened. A control that disables itself on error is not a control.
+                val controls = CONTROL_PATHS.mapNotNull { control ->
+                    delay(REQUEST_SPACING_MS)
+                    LanHttpClient.probe("$base/$control")
+                }
 
-                if (answersEverything) {
+                if (!PathEvidence.canProbePaths(controls.size)) {
+                    // Fail closed. Without a baseline there is no way to tell a real path from a
+                    // catch-all, and reporting them anyway is how the false positives got out.
+                    findings++
+                    emit(
+                        Finding(
+                            moduleId = id,
+                            observedAtEpochMs = System.currentTimeMillis(),
+                            severity = Severity.INFO,
+                            title = "Path probing skipped on $base",
+                            subject = base,
+                            detail = "Neither control request completed, so there is no way to tell " +
+                                "whether this device distinguishes a real path from an invented " +
+                                "one. Path findings are only meaningful against that baseline, so " +
+                                "none were produced. The host answered its root, so it is worth " +
+                                "trying again or looking by hand.",
+                            data = mapOf("controls_attempted" to CONTROL_PATHS.size.toString()),
+                        ),
+                    )
+                    return@forEach
+                }
+
+                val answeringControl = controls.firstOrNull { control ->
+                    control.isSuccess && !HttpAnalysis.isSoftError(control)
+                }
+
+                if (answeringControl != null) {
                     findings++
                     emit(
                         Finding(
@@ -135,27 +166,33 @@ class WebExposureModule : PentestModule {
                             title = "Answers every path identically",
                             subject = base,
                             detail = "A deliberately nonexistent path returned HTTP " +
-                                "${baseline!!.status} with ${baseline.body.length} bytes" +
-                                (HttpAnalysis.pageTitle(baseline)?.let { ", titled '$it'" } ?: "") +
+                                "${answeringControl.status} with ${answeringControl.body.length} bytes" +
+                                (HttpAnalysis.pageTitle(answeringControl)?.let { ", titled '$it'" } ?: "") +
                                 ". This device does not distinguish a real path from an invented " +
                                 "one, so path probing cannot tell you anything here and was " +
                                 "skipped. Anything genuinely exposed must be found by hand.",
                             data = mapOf(
-                                "control_status" to baseline.status.toString(),
-                                "control_bytes" to baseline.body.length.toString(),
+                                "control_status" to answeringControl.status.toString(),
+                                "control_bytes" to answeringControl.body.length.toString(),
                             ),
                         ),
                     )
                     return@forEach
                 }
 
+                // Everything a real path must not look like: any control's body, and the root.
+                // A single-page admin interface serves its shell for every unknown path, and the
+                // shell is usually the root.
+                val decoys = (controls + root).map { it.body.length }.toSet()
+
                 SENSITIVE_PATHS.forEach { (path, description) ->
                     delay(REQUEST_SPACING_MS)
                     val response = LanHttpClient.probe("$base$path") ?: return@forEach
                     if (!response.isSuccess || HttpAnalysis.isSoftError(response)) return@forEach
                     if (response.body.isBlank()) return@forEach
-                    // Byte-identical to the known-bad path means it is that page, not this one.
-                    if (baseline != null && response.body.length == baseline.body.length) return@forEach
+                    // The same size as a page known not to exist, or as the root, means this is
+                    // that page under another name rather than something this path exposes.
+                    if (!PathEvidence.isDistinct(response.body.length, decoys)) return@forEach
 
                     findings++
                     emit(
@@ -172,6 +209,10 @@ class WebExposureModule : PentestModule {
                                 "path" to path,
                                 "status" to response.status.toString(),
                                 "bytes" to response.body.length.toString(),
+                                // Carried so a surprising finding can be checked against what the
+                                // controls returned rather than taken on trust.
+                                "control_bytes" to controls.joinToString { it.body.length.toString() },
+                                "root_bytes" to root.body.length.toString(),
                             ),
                         ),
                     )
@@ -197,7 +238,14 @@ class WebExposureModule : PentestModule {
         const val REQUEST_SPACING_MS = 60L
 
         /** A path no device could legitimately serve, used to detect catch-all responders. */
-        const val CONTROL_PATH = "mobileops-control-9f2a7c41"
+        /**
+         * Two, so a single failed request cannot leave the module without a baseline. Both are
+         * shaped like a real path and neither can exist.
+         */
+        val CONTROL_PATHS = listOf(
+            "mobileops-control-9f2a7c41",
+            "status/mobileops-control-3d81e6b2.cgi",
+        )
 
         val PORTS = listOf(80 to "http", 8080 to "http", 443 to "https", 8443 to "https")
 
