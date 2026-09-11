@@ -392,6 +392,12 @@ object Smb {
     private const val MAX_PIPE_RESPONSE = 64 * 1024
 
     const val STATUS_SUCCESS = 0
+
+    /**
+     * Not a failure: the server is saying it will answer on this connection shortly. A caller
+     * that treats the interim reply as the answer reads a result that was on its way as empty.
+     */
+    const val STATUS_PENDING = 0x00000103
     const val STATUS_MORE_PROCESSING_REQUIRED = 0xC0000016.toInt()
     const val STATUS_LOGON_FAILURE = 0xC000006D.toInt()
     const val STATUS_ACCESS_DENIED = 0xC0000022.toInt()

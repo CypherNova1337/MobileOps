@@ -290,10 +290,27 @@ class SmbAssessmentModule : PentestModule {
             }
         }.getOrNull()
 
+    /**
+     * Sends one request and returns the response that actually carries the answer.
+     *
+     * A server that cannot answer at once replies STATUS_PENDING and sends the real response on
+     * the same connection afterwards. Taking the first message as the answer reads that interim
+     * reply as an empty result — which is how a share enumeration that the server was in the
+     * middle of satisfying came back as "NetrShareEnum returned nothing (0x00000103)".
+     */
     private fun roundTrip(socket: Socket, request: ByteArray): ByteArray? = runCatching {
         socket.getOutputStream().write(request)
         socket.getOutputStream().flush()
-        readFramed(socket.getInputStream())
+
+        var response = readFramed(socket.getInputStream())
+        var waited = 0
+        while (response != null && Smb.statusOf(response) == Smb.STATUS_PENDING &&
+            waited < MAX_PENDING_REPLIES
+        ) {
+            response = readFramed(socket.getInputStream())
+            waited++
+        }
+        response
     }.getOrNull()
 
     /**
@@ -548,6 +565,13 @@ class SmbAssessmentModule : PentestModule {
     private companion object {
         val SMB_PORTS = listOf(445, 139)
         const val CONNECT_TIMEOUT_MS = 3_000
+
+        /**
+         * How many interim replies to read through. A server sends one STATUS_PENDING and then
+         * the answer; more than a couple means something else is wrong and waiting longer will
+         * not fix it.
+         */
+        const val MAX_PENDING_REPLIES = 4
         const val READ_TIMEOUT_MS = 5_000
 
         /** A negotiate or session setup is a few hundred bytes; anything vast is not one. */

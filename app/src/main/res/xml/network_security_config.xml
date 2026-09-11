@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP has to be permitted, and this is the one setting that decides it.
+
+  Since API 28 Android blocks cleartext by default, and it blocks it inside the HTTP stack
+  rather than at the socket: the request throws before a packet leaves the handset, with a
+  message about policy rather than about the network. For an app that talks to LAN appliances
+  that is not a safety default, it is a blindfold — the WPS registrar description on port 49152,
+  IPP on 631, and every router and printer admin page on port 80 are plain HTTP, and all of them
+  failed silently for as long as this was unset.
+
+  The trade is the opposite of the usual one. This app exists to look at devices that do not use
+  TLS, on a network the operator was asked to assess; refusing to speak to them audits nothing.
+  It sends no credential of its own, and the interception path validates upstream certificates
+  properly — that is where cleartext would actually cost something, and it is a different code
+  path from this one.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <!--
+              LAN appliances ship self-signed certificates, so a user-installed CA has to be
+              trusted for the interception path to be usable at all.
+            -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -4,6 +4,7 @@ import dev.cyphernova.mobileops.core.smb.Ntlm
 import dev.cyphernova.mobileops.core.smb.Smb
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -198,6 +199,24 @@ class SmbTest {
         assertEquals(Smb.Family.SMB1, Smb.dialectFamilyOf(smb1NegotiateResponse))
         assertEquals(Smb.Family.SMB2, Smb.dialectFamilyOf(negotiateSigningRequired))
         assertNull(Smb.dialectFamilyOf(Smb.frame("not smb at all".toByteArray())))
+    }
+
+    /**
+     * Taken from a live run: the share enumeration reported "NetrShareEnum returned nothing
+     * (0x00000103)". 0x103 is STATUS_PENDING — the server saying it will answer shortly on the
+     * same connection, not a refusal. Read as the answer, a result that was on its way looks like
+     * an empty one.
+     */
+    @Test
+    fun `a pending status is recognised as an interim reply rather than a refusal`() {
+        assertEquals(0x00000103, Smb.STATUS_PENDING)
+        val pending = Smb.frame(
+            Smb.stripFrame(sessionSetupNullAccepted)!!.copyOf().also { body ->
+                ByteBuffer.wrap(body).order(ByteOrder.LITTLE_ENDIAN).putInt(8, Smb.STATUS_PENDING)
+            },
+        )
+        assertEquals(Smb.STATUS_PENDING, Smb.statusOf(pending))
+        assertNotEquals(Smb.STATUS_SUCCESS, Smb.statusOf(pending))
     }
 
     @Test
