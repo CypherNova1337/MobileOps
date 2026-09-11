@@ -2,6 +2,8 @@ package dev.cyphernova.mobileops.modules.tier0
 
 import android.Manifest
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import dev.cyphernova.mobileops.core.attack.AttackPath
 import dev.cyphernova.mobileops.core.attack.EnterpriseWifi
@@ -114,7 +116,8 @@ class WifiAssessmentModule : PentestModule {
     ): Boolean {
         val profile = ApSecurityAnalyser.analyse(ap)
         val beacon = BeaconAudit.profileOf(ap)
-        val target = describe(context, ap, profile, beacon)
+        val lanAccess = lanAccessTo(context.androidContext, ap.ssid, ap.bssid)
+        val target = describe(context, ap, profile, beacon, lanAccess)
         // Enterprise routes come from a separate analysis because the question is different:
         // there is no shared passphrase, so the exposure is in the client and in what the
         // RADIUS exchange gives away, neither of which the PSK reasoning covers.
@@ -123,7 +126,7 @@ class WifiAssessmentModule : PentestModule {
             .sortedBy { it.viability.rank }
         val open = routes.count { it.viability == AttackPath.Viability.OPEN }
 
-        emit(verdictFinding(ap, radios, profile, target, routes, open))
+        emit(verdictFinding(ap, radios, profile, target, routes, open, lanAccess))
         EnterpriseWifi.assess(posture).forEach { note -> emit(enterpriseFinding(ap, note)) }
 
         // The routes that are not open are the useful half of the answer — they say what would
@@ -200,6 +203,7 @@ class WifiAssessmentModule : PentestModule {
         ap: ApObservation,
         profile: SecurityProfile,
         beacon: BeaconProfile?,
+        lanAccess: LanAccess,
     ): AttackPath.Target {
         // SAE with no PSK alongside it is the case offline recovery cannot touch. Transition
         // mode lists both, and is therefore still a passphrase target. The RSN element is the
@@ -224,7 +228,7 @@ class WifiAssessmentModule : PentestModule {
             managementFrameProtectionRequired = rsn?.managementFrameProtectionRequired == true,
             factoryDefaultSsid = SsidIntel.isFactoryDefault(ap.ssid),
             haveCapture = haveCaptureFor(context.androidContext, ap.ssid),
-            haveLanAccess = associatedWith(context.androidContext, ap.ssid),
+            haveLanAccess = lanAccess != LanAccess.NONE,
         )
     }
 
@@ -235,6 +239,7 @@ class WifiAssessmentModule : PentestModule {
         target: AttackPath.Target,
         routes: List<AttackPath.Route>,
         open: Int,
+        lanAccess: LanAccess,
     ) = Finding(
         moduleId = id,
         observedAtEpochMs = System.currentTimeMillis(),
@@ -264,6 +269,14 @@ class WifiAssessmentModule : PentestModule {
             append(if (target.wpsAdvertised) ", WPS advertised" else ", no WPS")
             append(if (target.factoryDefaultSsid) ", factory SSID unchanged" else "")
             append(".")
+            if (lanAccess == LanAccess.LIKELY) {
+                append(
+                    "\n\nThis handset has an address on a WiFi subnet but the platform would " +
+                        "not confirm which network, so the LAN-side routes are treated as open " +
+                        "on the assumption it is this one. If it is not, they are a pivot rather " +
+                        "than a route in.",
+                )
+            }
         },
         data = mapOf(
             "ssid" to ap.ssid,
@@ -275,7 +288,7 @@ class WifiAssessmentModule : PentestModule {
             "routes_needing_capture" to
                 routes.count { it.viability == AttackPath.Viability.NEEDS_CAPTURE }.toString(),
             "have_capture" to target.haveCapture.toString(),
-            "have_lan_access" to target.haveLanAccess.toString(),
+            "have_lan_access" to lanAccess.name,
             "pmf_required" to target.managementFrameProtectionRequired.toString(),
         ),
     )
@@ -343,20 +356,74 @@ class WifiAssessmentModule : PentestModule {
         }
     }
 
-    /** Whether this handset already has an IP on the target, which opens the LAN-side routes. */
+    /** How sure the module is that this handset is already on the network under test. */
+    private enum class LanAccess { CONFIRMED, LIKELY, NONE }
+
+    /**
+     * Whether this handset already has an IP on the target, which opens the LAN-side routes.
+     *
+     * Three states rather than two, because the difference matters to the verdict. The platform
+     * will not always say which network it is on — `getConnectionInfo` is deprecated and returns
+     * a redacted `<unknown ssid>` in several situations — and an earlier version read that as
+     * "not connected". It then reported *no route open* on a network whose registrar was sitting
+     * there answering, because it could not read a name it had no trouble routing packets over.
+     *
+     * Unknown is not false. Where the handset plainly has an address on a WiFi subnet but the
+     * name cannot be confirmed, that is [LIKELY] and the verdict says so.
+     */
+    private fun lanAccessTo(context: Context, ssid: String, bssid: String): LanAccess {
+        val name = currentWifiIdentity(context)
+        val position = LocalNetwork.position(context)
+        val onWifiSubnet = position != null &&
+            position.hasLocalSubnet &&
+            position.transport == Transport.WIFI
+
+        return when {
+            // A BSSID match is unambiguous; an SSID match is good enough.
+            name != null && (name.bssid.equals(bssid, ignoreCase = true) || name.ssid == ssid) ->
+                LanAccess.CONFIRMED
+
+            // A name came back and it is a different network. That is a real negative.
+            name != null && name.readable -> LanAccess.NONE
+
+            onWifiSubnet -> LanAccess.LIKELY
+            else -> LanAccess.NONE
+        }
+    }
+
+    private data class WifiIdentity(val ssid: String, val bssid: String) {
+        /** The platform redacts to a literal placeholder rather than returning nothing. */
+        val readable: Boolean get() = ssid.isNotBlank() && ssid != UNKNOWN_SSID
+    }
+
+    /**
+     * The current association, read through the modern route first.
+     *
+     * `NetworkCapabilities.getTransportInfo()` is what the platform intends an app to use from
+     * Android 10; `WifiManager.getConnectionInfo()` is the deprecated one that does the redacting.
+     */
     @Suppress("DEPRECATION")
-    private fun associatedWith(context: Context, ssid: String): Boolean {
-        if (ssid.isBlank()) return false
+    private fun currentWifiIdentity(context: Context): WifiIdentity? {
+        val connectivity = context.applicationContext
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+
+        val fromCapabilities = runCatching {
+            val network = connectivity?.boundNetworkForProcess ?: connectivity?.activeNetwork
+            val info = connectivity?.getNetworkCapabilities(network)?.transportInfo as? WifiInfo
+            info?.let { WifiIdentity(it.ssid.orEmpty().trim('"'), it.bssid.orEmpty()) }
+        }.getOrNull()
+        if (fromCapabilities?.readable == true) return fromCapabilities
+
         val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            ?: return false
-        val connected = runCatching { wifi.connectionInfo?.ssid }.getOrNull() ?: return false
-        // WifiInfo quotes the SSID, and an unavailable one comes back as a literal placeholder.
-        return connected.trim('"') == ssid
+        return runCatching {
+            wifi?.connectionInfo?.let { WifiIdentity(it.ssid.orEmpty().trim('"'), it.bssid.orEmpty()) }
+        }.getOrNull() ?: fromCapabilities
     }
 
     private companion object {
         const val SCAN_SETTLE_MS = 3_000L
         const val CAPTURE_DIR = "handshakes"
+        const val UNKNOWN_SSID = "<unknown ssid>"
 
         val PSK_ENCRYPTIONS = setOf(
             Encryption.WPA,

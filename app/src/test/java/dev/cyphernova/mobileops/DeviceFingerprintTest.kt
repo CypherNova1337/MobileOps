@@ -137,6 +137,37 @@ class DeviceFingerprintTest {
         ).forEach { assertTrue(DeviceFingerprint.classify(it).basis.isNotBlank()) }
     }
 
+    /**
+     * Taken from a live run. The scan found these ports and pulled the model out of an FTP
+     * banner, and the report still called it an address with ports open — the classifier was
+     * reachable from host discovery, which sees far fewer ports, but not from the port scan.
+     */
+    @Test
+    fun `a printer found by a port scan is identified as one`() {
+        val verdict = DeviceFingerprint.classify(
+            evidence(
+                ports = setOf(21, 80, 443, 631, 8000, 9100),
+                banners = mapOf(21 to "220 ET0021B7EDF1EA Lexmark MS312dn FTP Server NH5.CY.N543 ready."),
+            ),
+        )
+        assertEquals(Category.PRINTER, verdict.category)
+        // Port and banner agreeing is the strongest evidence there is.
+        assertEquals(Confidence.CONFIRMED, verdict.confidence)
+        // The port explains the service; the banner explains why the device matters. Both.
+        assertTrue(verdict.significance.contains("Internet Printing Protocol"))
+        assertTrue(verdict.significance.contains("scanned documents"))
+    }
+
+    @Test
+    fun `a banner alone identifies the same printer`() {
+        assertEquals(
+            Category.PRINTER,
+            DeviceFingerprint.classify(
+                evidence(ports = setOf(80), banners = mapOf(80 to "Lexmark MS312dn")),
+            ).category,
+        )
+    }
+
     @Test
     fun `the port catalogue records significance for everything it knows`() {
         assertTrue(IotPorts.allPorts.isNotEmpty())

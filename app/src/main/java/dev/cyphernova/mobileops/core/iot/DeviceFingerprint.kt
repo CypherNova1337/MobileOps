@@ -78,9 +78,27 @@ object DeviceFingerprint {
     fun classify(evidence: Evidence): Verdict {
         // Port evidence outranks name evidence: a device can be called anything, but a protocol
         // answering on its registered port is a fact about what it runs.
-        portVerdict(evidence)?.let { return it }
-        nameVerdict(evidence)?.let { return it }
-        return fallback(evidence)
+        val byPort = portVerdict(evidence)
+        val byName = nameVerdict(evidence)
+
+        if (byPort != null) {
+            // Where both agree, the name usually says the more useful half. A printer found on
+            // 631 gets "IPP discloses the model"; the banner that also named it a Lexmark gets
+            // "holds scanned documents and scan-to-folder credentials", which is what an
+            // assessor actually needs. Keeping both loses nothing.
+            if (byName != null && byName.category == byPort.category) {
+                return byPort.copy(
+                    confidence = Confidence.CONFIRMED,
+                    basis = "${byPort.basis}, and ${byName.basis}",
+                    significance = listOf(byPort.significance, byName.significance)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" "),
+                )
+            }
+            return byPort
+        }
+
+        return byName ?: fallback(evidence)
     }
 
     private fun portVerdict(evidence: Evidence): Verdict? {

@@ -3,6 +3,8 @@ package dev.cyphernova.mobileops.modules.tier0
 import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
+import dev.cyphernova.mobileops.core.iot.DeviceFingerprint
+import dev.cyphernova.mobileops.core.iot.IotPorts
 import dev.cyphernova.mobileops.core.module.Intrusiveness
 import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
@@ -54,35 +56,103 @@ class PortScanModule : PentestModule {
             }
             openCount += open.size
 
-            open.forEach { result ->
-                val service = SERVICE_PORTS[result.port].orEmpty()
-                emit(
-                    Finding(
-                        moduleId = id,
-                        observedAtEpochMs = System.currentTimeMillis(),
-                        severity = severityFor(result.port),
-                        title = "$host:${result.port} open ($service)",
-                        subject = "$host:${result.port}",
-                        detail = buildString {
-                            append("TCP connect succeeded in ${result.latencyMs} ms.")
-                            if (result.banner.isNotBlank()) {
-                                append(" Banner: ${result.banner.take(BANNER_CHARS)}")
-                            }
-                            noteFor(result.port)?.let { append(" $it") }
-                        },
-                        data = mapOf(
-                            "port" to result.port.toString(),
-                            "service" to service,
-                            "latency_ms" to result.latencyMs.toString(),
-                            "banner" to result.banner.take(BANNER_CHARS),
-                        ),
-                    ),
-                )
+            if (open.isEmpty()) return@forEach
+
+            // What the host *is*, worked out from everything the scan just learned about it.
+            // The classifier was previously only reachable from host discovery, which probes a
+            // handful of ports — so a scan that pulled "Lexmark MS312dn" out of an FTP banner
+            // and found 9100 and 631 alongside it still reported an address with ports open.
+            emit(identityFinding(host, open))
+
+            // One finding per host rather than per port. Three hosts produced fourteen notes
+            // that each said "a port is open", which is an inventory pretending to be findings.
+            emit(servicesFinding(host, open))
+
+            // Only the ports that carry a real exposure get their own entry.
+            open.filter { severityFor(it.port) >= Severity.MEDIUM }.forEach { result ->
+                emit(exposureFinding(host, result))
             }
         }
 
         return ModuleOutcome.Completed("$openCount open port(s) across ${targets.size} host(s).")
     }
+
+    /** What the scan says this host is, where the evidence supports saying anything. */
+    private fun identityFinding(host: String, open: List<OpenPort>): Finding {
+        val verdict = DeviceFingerprint.classify(
+            DeviceFingerprint.Evidence(
+                address = host,
+                openPorts = open.map { it.port }.toSet(),
+                banners = open.filter { it.banner.isNotBlank() }.associate { it.port to it.banner },
+            ),
+        )
+        return Finding(
+            moduleId = id,
+            observedAtEpochMs = System.currentTimeMillis(),
+            severity = if (verdict.fragility == IotPorts.Fragility.FRAGILE) Severity.LOW else Severity.INFO,
+            title = "${verdict.category.label} — $host",
+            subject = host,
+            detail = buildString {
+                append("Identified as ${verdict.category.label} (${verdict.confidence.label}): ")
+                append("${verdict.basis}. ")
+                if (verdict.significance.isNotBlank()) append("${verdict.significance} ")
+                if (verdict.fragility == IotPorts.Fragility.FRAGILE) {
+                    append(
+                        "Handled as ${verdict.fragility.label}. This scan has already completed, " +
+                            "but do not point a general-purpose scanner at it — equipment of this " +
+                            "kind faults under scans a server would not notice.",
+                    )
+                }
+            },
+            data = mapOf(
+                "host" to host,
+                "category" to verdict.category.name,
+                "confidence" to verdict.confidence.name,
+                "fragility" to verdict.fragility.name,
+                "open_ports" to open.joinToString { it.port.toString() },
+            ),
+        )
+    }
+
+    /** Everything answering on one host, as one entry. */
+    private fun servicesFinding(host: String, open: List<OpenPort>) = Finding(
+        moduleId = id,
+        observedAtEpochMs = System.currentTimeMillis(),
+        severity = Severity.INFO,
+        title = "${open.size} open port(s) on $host",
+        subject = host,
+        detail = open.sortedBy { it.port }.joinToString("; ") { result ->
+            buildString {
+                append("${result.port}/${SERVICE_PORTS[result.port].orEmpty()}")
+                if (result.banner.isNotBlank()) append(" — ${result.banner.take(BANNER_CHARS)}")
+            }
+        },
+        data = mapOf(
+            "host" to host,
+            "open_ports" to open.sortedBy { it.port }.joinToString { it.port.toString() },
+            "banners" to open.filter { it.banner.isNotBlank() }
+                .joinToString("; ") { "${it.port}=${it.banner.take(BANNER_CHARS)}" },
+        ),
+    )
+
+    /** A port that is an exposure in itself, rather than a line in an inventory. */
+    private fun exposureFinding(host: String, result: OpenPort) = Finding(
+        moduleId = id,
+        observedAtEpochMs = System.currentTimeMillis(),
+        severity = severityFor(result.port),
+        title = "${SERVICE_PORTS[result.port].orEmpty()} on $host:${result.port}",
+        subject = "$host:${result.port}",
+        detail = buildString {
+            noteFor(result.port)?.let { append("$it ") }
+            if (result.banner.isNotBlank()) append("Banner: ${result.banner.take(BANNER_CHARS)}")
+        }.trim(),
+        data = mapOf(
+            "host" to host,
+            "port" to result.port.toString(),
+            "service" to SERVICE_PORTS[result.port].orEmpty(),
+            "banner" to result.banner.take(BANNER_CHARS),
+        ),
+    )
 
     private data class OpenPort(val port: Int, val latencyMs: Long, val banner: String)
 
