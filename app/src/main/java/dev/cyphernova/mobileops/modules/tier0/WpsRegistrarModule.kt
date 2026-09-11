@@ -4,6 +4,7 @@ import dev.cyphernova.mobileops.core.beacon.BeaconElements
 import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
+import dev.cyphernova.mobileops.core.exploit.UpnpLocations
 import dev.cyphernova.mobileops.core.exploit.UpnpWps
 import dev.cyphernova.mobileops.core.exploit.Wsc
 import dev.cyphernova.mobileops.core.exploit.WpsPin
@@ -59,17 +60,36 @@ class WpsRegistrarModule : PentestModule {
         var recovered = 0
 
         hosts.forEach { host ->
-            val description = findDescription(host) ?: return@forEach
+            val search = findDescription(context, host)
+            if (!search.found) {
+                // Reported rather than skipped. "No description found" with no record of what was
+                // asked for is indistinguishable from the module not having run.
+                emit(
+                    note(
+                        host,
+                        "No UPnP description answered on $host",
+                        host,
+                        "Tried ${search.attempted.size} URL(s) and none returned a device " +
+                            "description: ${search.attempted.joinToString()}. Where service " +
+                            "discovery has already advertised a location for this host it is " +
+                            "tried first, so this means the service is genuinely not answering " +
+                            "rather than that the port was guessed wrongly. Run service discovery " +
+                            "first if it has not been run in this session.",
+                        data = mapOf("attempted" to search.attempted.joinToString()),
+                    ),
+                )
+                return@forEach
+            }
             probed++
 
-            val service = UpnpWps.findWpsService(description.second, description.first)
+            val service = UpnpWps.findWpsService(search.body!!, search.url!!)
             if (service == null) {
                 emit(
                     note(
                         host,
                         "No WPS registrar service on $host",
                         host,
-                        "The UPnP description at ${description.first} does not advertise " +
+                        "The UPnP description at ${search.url} does not advertise " +
                             "WFAWLANConfig, so there is no registrar reachable over UPnP here.",
                     ),
                 )
@@ -477,20 +497,42 @@ class WpsRegistrarModule : PentestModule {
         "SOAPAction" to UpnpWps.soapAction(service.serviceType, action),
     )
 
-    /** Finds a UPnP description document on the ports these services habitually use. */
-    private suspend fun findDescription(host: String): Pair<String, String>? {
-        DESCRIPTION_CANDIDATES.forEach { (port, path) ->
-            val url = "http://$host:$port$path"
-            val response = LanHttpClient.probe(url, timeoutMs = 3_000) ?: return@forEach
+    /** A description document, and every URL that was tried to find it. */
+    private data class DescriptionSearch(
+        val url: String?,
+        val body: String?,
+        val attempted: List<String>,
+    ) {
+        val found: Boolean get() = url != null && body != null
+    }
+
+    /**
+     * Finds the UPnP description document for a host.
+     *
+     * The ordering lives in [UpnpLocations]: what SSDP advertised first, habitual ports only as a
+     * fallback. This walks that list and keeps the first document that is actually a description.
+     */
+    private suspend fun findDescription(
+        context: ModuleContext,
+        host: String,
+    ): DescriptionSearch {
+        val attempted = mutableListOf<String>()
+        val guesses = DESCRIPTION_CANDIDATES.map { (port, path) -> "http://$host:$port$path" }
+
+        UpnpLocations.candidatesFor(context.priorFindings, host, guesses).forEach { url ->
+            attempted += url
+            val response = LanHttpClient.probe(url, timeoutMs = DESCRIPTION_TIMEOUT_MS)
+                ?: return@forEach
             if (response.isSuccess && response.body.contains("<serviceType>", ignoreCase = true)) {
-                return url to response.body
+                return DescriptionSearch(url, response.body, attempted)
             }
         }
-        return null
+        return DescriptionSearch(null, null, attempted)
     }
 
     private companion object {
         const val REQUEST_TIMEOUT_MS = 8_000
+        const val DESCRIPTION_TIMEOUT_MS = 4_000
 
         /**
          * A module run has to end. Ninety seconds is enough for every derived candidate and a

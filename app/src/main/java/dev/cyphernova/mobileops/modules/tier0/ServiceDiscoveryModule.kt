@@ -8,6 +8,7 @@ import dev.cyphernova.mobileops.core.discovery.Nbns
 import dev.cyphernova.mobileops.core.discovery.Ssdp
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
+import dev.cyphernova.mobileops.core.exploit.UpnpLocations
 import dev.cyphernova.mobileops.core.module.Intrusiveness
 import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
@@ -192,6 +193,14 @@ class ServiceDiscoveryModule : PentestModule {
             val server = entries.firstNotNullOfOrNull { it.server }
             val location = entries.firstNotNullOfOrNull { it.location }
             val targets = entries.mapNotNull { it.searchTarget }.distinct()
+            // A router runs several UPnP daemons on ephemeral ports and answers from all of them
+            // on the one address. Keeping only the first location loses the others, and the one
+            // that matters to the registrar attack is whichever answered for WFAWLANConfig — so
+            // every location is recorded, and that one is named.
+            val locations = entries.mapNotNull { it.location }.distinct()
+            val wpsLocation = entries.firstOrNull {
+                it.searchTarget?.contains(UpnpLocations.WPS_SERVICE_HINT, ignoreCase = true) == true
+            }?.location
 
             emit(
                 Finding(
@@ -199,17 +208,32 @@ class ServiceDiscoveryModule : PentestModule {
                     observedAtEpochMs = System.currentTimeMillis(),
                     // A Server header names the product and often its firmware version, which is
                     // the fastest route from "a device is here" to "this device has known CVEs".
-                    severity = if (server != null) Severity.LOW else Severity.INFO,
+                    // A host advertising WFAWLANConfig is offering the WPS External Registrar to
+                    // anyone on the LAN, which is the one classic WPS attack an unrooted phone can
+                    // reach. That is worth more than a product banner.
+                    severity = when {
+                        wpsLocation != null -> Severity.MEDIUM
+                        server != null -> Severity.LOW
+                        else -> Severity.INFO
+                    },
                     title = "UPnP: ${server ?: source}",
                     subject = source,
                     detail = buildString {
                         server?.let { append("Identifies itself as '$it'. ") }
                         location?.let { append("Device description at $it. ") }
-                        if (targets.isNotEmpty()) append("Offers ${targets.size} service type(s).")
+                        if (targets.isNotEmpty()) append("Offers ${targets.size} service type(s). ")
+                        if (wpsLocation != null) {
+                            append(
+                                "Advertises the WPS External Registrar at $wpsLocation — run the " +
+                                    "WPS registrar attack against this host.",
+                            )
+                        }
                     },
                     data = mapOf(
                         "server" to server.orEmpty(),
                         "location" to location.orEmpty(),
+                        "locations" to locations.joinToString(),
+                        "wps_location" to wpsLocation.orEmpty(),
                         "service_types" to targets.take(20).joinToString(),
                     ),
                 ),
