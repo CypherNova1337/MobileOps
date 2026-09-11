@@ -48,8 +48,31 @@ class ModuleRunner(private val evidenceStore: EvidenceStore) {
                 remedy = "Pick a host on the Targets tab, or run a sweep to discover some.",
             )
         }
+        val missingInputs = missingPrerequisites(module)
+        if (missingInputs.isNotEmpty()) {
+            return Blocker(
+                headline = "Nothing to work from yet",
+                remedy = "This reads what other modules found. Run " +
+                    missingInputs.joinToString(" and ") { titleOf(it) } + " first.",
+            )
+        }
         return null
     }
+
+    /**
+     * Which of a module's declared inputs have produced nothing in the log.
+     *
+     * Judged on findings rather than on whether the module was started, because a module that ran
+     * and found nothing leaves the dependent module just as empty-handed.
+     */
+    fun missingPrerequisites(module: PentestModule): List<String> {
+        if (module.prerequisites.isEmpty()) return emptyList()
+        val present = evidenceStore.findings.value.map { it.moduleId }.toSet()
+        return module.prerequisites.filterNot { it in present }
+    }
+
+    private fun titleOf(moduleId: String): String =
+        ModuleRegistry.all.firstOrNull { it.id == moduleId }?.title ?: moduleId
 
     suspend fun run(
         module: PentestModule,

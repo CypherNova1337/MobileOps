@@ -48,6 +48,9 @@ class WpsRegistrarModule : PentestModule {
     override val category = ModuleCategory.EXPLOIT
     override val requiresTarget = true
 
+    // The description location comes out of SSDP. Guessing at ports does not work.
+    override val prerequisites = listOf("t0.net.services")
+
     override suspend fun run(
         context: ModuleContext,
         emit: suspend (Finding) -> Unit,

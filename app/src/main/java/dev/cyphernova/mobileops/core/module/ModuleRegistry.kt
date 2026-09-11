@@ -10,6 +10,7 @@ import dev.cyphernova.mobileops.modules.tier0.IotDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.NetworkJoinModule
 import dev.cyphernova.mobileops.modules.tier0.IdentityAuditModule
 import dev.cyphernova.mobileops.modules.tier0.PortScanModule
+import dev.cyphernova.mobileops.modules.tier0.PrinterModule
 import dev.cyphernova.mobileops.modules.tier0.RogueApModule
 import dev.cyphernova.mobileops.modules.tier0.SsidIntelModule
 import dev.cyphernova.mobileops.modules.tier0.WardriveModule
@@ -53,6 +54,7 @@ object ModuleRegistry {
         IotDiscoveryModule(),
         SegmentationModule(),
         SmbAssessmentModule(),
+        PrinterModule(),
         TlsAuditModule(),
         WebExposureModule(),
         DefaultCredentialModule(),

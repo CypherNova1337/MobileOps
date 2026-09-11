@@ -47,6 +47,9 @@ class SmbAssessmentModule : PentestModule {
     override val category = ModuleCategory.NETWORK
     override val requiresTarget = false
 
+    // Picks its own hosts out of whatever answered on 139 or 445.
+    override val prerequisites = listOf("t0.net.discovery")
+
     override suspend fun run(
         context: ModuleContext,
         emit: suspend (Finding) -> Unit,
