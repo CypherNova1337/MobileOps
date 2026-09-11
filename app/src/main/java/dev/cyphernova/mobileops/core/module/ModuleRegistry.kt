@@ -5,6 +5,7 @@ import dev.cyphernova.mobileops.modules.tier0.HostDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.IdentityAuditModule
 import dev.cyphernova.mobileops.modules.tier0.PortScanModule
 import dev.cyphernova.mobileops.modules.tier0.RogueApModule
+import dev.cyphernova.mobileops.modules.tier0.SiteSurveyModule
 import dev.cyphernova.mobileops.modules.tier0.ServiceDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.TlsAuditModule
 import dev.cyphernova.mobileops.modules.tier0.TlsInterceptModule
@@ -23,6 +24,7 @@ import dev.cyphernova.mobileops.modules.tier2.MonitorModeModule
 object ModuleRegistry {
 
     val all: List<PentestModule> = listOf(
+        SiteSurveyModule(),
         WifiSurveyModule(),
         RogueApModule(),
         HostDiscoveryModule(),

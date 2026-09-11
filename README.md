@@ -169,10 +169,17 @@ walking around or on cellular:
 
 | Works anywhere | Needs a local subnet |
 | --- | --- |
-| WiFi survey and beacon elements — scanning does not require associating | Host discovery |
-| Rogue AP correlation | Service & name discovery |
-| Device identity audit | Port scan, TLS audit |
-| Traffic capture and TLS interception — these work fine over cellular | Web exposure, credentials, WPS registrar |
+| **RF site survey** — every AP in range, vendors, channel congestion, security census | Host discovery |
+| WiFi survey and beacon elements — scanning does not require associating | Service & name discovery |
+| Rogue AP correlation | Port scan, TLS audit |
+| Device identity audit | Web exposure, credentials, WPS registrar |
+| Traffic capture and TLS interception — these work fine over cellular | |
+
+`t0.wifi.sitesurvey` is the module built for this. It repeats the scan four times — matching the
+platform's per-window allowance rather than fighting it — and aggregates everything heard: vendor
+from the BSSID prefix, 2.4 GHz channel overlap, a security census, and signal range per AP across
+the sweep. APs worth a second look (open, WEP, WPS, or a randomised BSSID, which infrastructure
+never has) get their own finding; the rest stay in the census so the report stays readable.
 
 A carrier link hands out a /32, which is point-to-point: no neighbours, nothing to sweep. The LAN
 modules detect that and say so rather than reporting a subnet that does not exist.
@@ -193,6 +200,8 @@ halfway still parses up to the last complete record) and exports as a Markdown r
 ## Modules
 
 **Tier 0 — passive**
+- `t0.wifi.sitesurvey` — repeated sweep of the whole RF environment: every AP in range, vendors,
+  channel congestion, security census. Needs no network of any kind.
 - `t0.wifi.survey` — grades each AP's advertised security: encryption suite, WPS exposure,
   802.11w management frame protection, hidden SSIDs. Audits the selected networks, or everything
   in range when nothing is selected.
