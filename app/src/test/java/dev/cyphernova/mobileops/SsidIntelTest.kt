@@ -41,10 +41,35 @@ class SsidIntelTest {
     @Test
     fun `a personal name is flagged but a serial-style name is not`() {
         assertTrue(SsidIntel.classify("Dave's House").any { it.label.contains("Personal") })
-        assertTrue(SsidIntel.classify("Smith Family Network").any { it.label.contains("Personal") })
+        assertTrue(SsidIntel.classify("Smith Family Home").any { it.label.contains("Personal") })
         // A factory name splits into words too, and must not be read as somebody's name.
         assertFalse(SsidIntel.classify("SpectrumSetup-4C").any { it.label.contains("Personal") })
         assertFalse(SsidIntel.classify("VoidSec").any { it.label.contains("Personal") })
+    }
+
+    /**
+     * Both of these were reported as household names in a live run. A word next to a serial is
+     * how every ISP names a gateway, and it takes two letters-only words to look like a person.
+     */
+    @Test
+    fun `a carrier gateway is not mistaken for a household name`() {
+        listOf("TMOBILE-5271", "MyAltice 0234a3", "Optimum-A7F2", "VoidSec -5G").forEach { ssid ->
+            assertFalse(ssid, SsidIntel.classify(ssid).any { it.label.contains("Personal") })
+        }
+    }
+
+    @Test
+    fun `carrier gateways are recognised as factory defaults instead`() {
+        assertEquals("T-Mobile", SsidIntel.vendorFromSsid("TMOBILE-5271"))
+        assertEquals("Altice", SsidIntel.vendorFromSsid("MyAltice 0234a3"))
+        assertTrue(SsidIntel.isFactoryDefault("TMOBILE-5271"))
+    }
+
+    /** A brand word beside a real word is branding, not somebody's name. */
+    @Test
+    fun `a vendor word next to a real word is not a personal name`() {
+        assertFalse(SsidIntel.classify("Netgear Upstairs").any { it.label.contains("Personal") })
+        assertFalse(SsidIntel.classify("Guest Network").any { it.label.contains("Personal") })
     }
 
     @Test

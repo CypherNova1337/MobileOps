@@ -13,6 +13,12 @@
     <!-- The WiFi stack drops multicast unless a lock is held, which would silently kill mDNS/SSDP. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+      Required by requestNetwork(), which is what raises a per-app WiFi association. It is a
+      normal permission, granted at install, but its absence makes the association request throw
+      rather than prompt — which reads exactly like a wrong passphrase.
+    -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- BLE reconnaissance. Scanning needs no pairing and no connection. -->
     <uses-permission

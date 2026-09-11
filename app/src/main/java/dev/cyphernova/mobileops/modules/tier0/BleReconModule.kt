@@ -8,6 +8,7 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
+import dev.cyphernova.mobileops.core.ble.BleServices
 import dev.cyphernova.mobileops.core.ble.BleVendors
 import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
@@ -222,13 +223,19 @@ class BleReconModule : PentestModule {
     private suspend fun emitNamedDevices(devices: List<Device>, emit: suspend (Finding) -> Unit) {
         devices.filter { it.name != null }.forEach { device ->
             val vendor = device.companyId?.let(BleVendors::describe)
+            val notable = device.services.mapNotNull(BleServices::notable)
             emit(
                 Finding(
                     moduleId = id,
                     observedAtEpochMs = System.currentTimeMillis(),
                     // A name that identifies a person or a specific product is information the
-                    // owner almost certainly did not mean to broadcast to the street.
-                    severity = if (looksPersonal(device.name!!)) Severity.LOW else Severity.INFO,
+                    // owner almost certainly did not mean to broadcast to the street; a service
+                    // that accepts firmware or acts as an input device is a larger question.
+                    severity = when {
+                        notable.isNotEmpty() -> Severity.MEDIUM
+                        looksPersonal(device.name!!) -> Severity.LOW
+                        else -> Severity.INFO
+                    },
                     title = "BLE device: ${device.name}",
                     subject = device.address,
                     detail = buildString {
@@ -237,8 +244,9 @@ class BleReconModule : PentestModule {
                         append("${device.strongest} dBm, seen ${device.sightings} time(s). ")
                         append(if (device.connectable) "Accepts connections. " else "Not connectable. ")
                         if (device.services.isNotEmpty()) {
-                            append("Advertises ${device.services.size} service UUID(s).")
+                            append("Advertises ${BleServices.describeAll(device.services)}.")
                         }
+                        notable.forEach { append(" It offers $it.") }
                     },
                     data = mapOf(
                         "address" to device.address,
@@ -246,7 +254,9 @@ class BleReconModule : PentestModule {
                         "vendor" to vendor.orEmpty(),
                         "rssi" to device.strongest.toString(),
                         "connectable" to device.connectable.toString(),
-                        "services" to device.services.take(8).joinToString(),
+                        "services" to device.services.take(8)
+                            .joinToString { BleServices.describe(it) },
+                        "service_uuids" to device.services.take(8).joinToString(),
                     ),
                 ),
             )

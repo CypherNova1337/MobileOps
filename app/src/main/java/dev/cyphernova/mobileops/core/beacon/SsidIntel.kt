@@ -81,18 +81,40 @@ object SsidIntel {
         SCHEMES.firstOrNull { it.pattern.containsMatchIn(ssid) }?.vendor
 
     /**
-     * Names split on separators into several word-shaped parts, or carrying a possessive, read
-     * as somebody's rather than a product's. Kept crude on purpose: the alternative is a name
-     * list, which would be worse.
+     * Whether a name reads as a person's rather than a product's.
+     *
+     * A possessive is decisive. Beyond that it takes *two* letters-only words, because one word
+     * next to a serial is how every ISP names a gateway — "TMOBILE-5271" and "MyAltice 0234a3"
+     * both split into a word and a hex blob, and calling those a household was wrong. Two
+     * letter-only words next to each other is what a name actually looks like.
+     *
+     * Kept crude on purpose: the alternative is a list of first names, which would be worse and
+     * would still miss every name not on it.
      */
     private fun looksPersonal(ssid: String): Boolean {
         if (isFactoryDefault(ssid)) return false
         if (ssid.contains('\'')) return true
-        val words = ssid.split(' ', '-', '_').filter { it.length > 2 }
-        if (words.size < 2) return false
-        // A name made entirely of hex or digits is a serial, not a household.
-        return words.any { word -> word.all { it.isLetter() } && word.first().isUpperCase() }
+        val words = ssid.split(' ', '-', '_', '.')
+            .filter { it.length > 2 }
+            // A part containing a digit is a serial or a model number, not part of a name.
+            .filter { word -> word.all(Char::isLetter) }
+        // Carrier and vendor tokens are branding wherever they appear, so they are dropped
+        // rather than disqualifying the name — "Smith Family Home" is still a household.
+        val remaining = words.filterNot { it.uppercase() in BRAND_WORDS }
+        return remaining.count { it.first().isUpperCase() } >= 2
     }
+
+    /**
+     * Words that turn up in equipment and network names and are never the finding. Uppercased at
+     * comparison time so case in the SSID does not matter.
+     */
+    private val BRAND_WORDS = setOf(
+        "TMOBILE", "MOBILE", "ALTICE", "MYALTICE", "OPTIMUM", "VERIZON", "XFINITY", "COMCAST",
+        "SPECTRUM", "CENTURYLINK", "FRONTIER", "COX", "STARLINK", "NETGEAR", "ORBI", "LINKSYS",
+        "ASUS", "TPLINK", "DLINK", "BELKIN", "UBIQUITI", "UNIFI", "EERO", "DECO", "GOOGLE",
+        "NEST", "WIFI", "NETWORK", "GUEST", "HOTSPOT", "SETUP", "HOME", "INTERNET", "FIBER",
+        "GATEWAY", "ROUTER", "EXTENDER", "REPEATER", "MESH",
+    )
 
     private val SCHEMES = listOf(
         Scheme(
@@ -142,6 +164,20 @@ object SsidIntel {
         Scheme(
             Regex("""^(CenturyLink|Frontier|Verizon_)\w*$""", RegexOption.IGNORE_CASE), "US ISP",
             "An ISP-supplied gateway on its factory name, implying untouched default credentials.",
+        ),
+        Scheme(
+            Regex("""^TMOBILE[-_]?\w{4,}$""", RegexOption.IGNORE_CASE), "T-Mobile",
+            "A T-Mobile home internet gateway on its factory name. The suffix is taken from the " +
+                "unit's serial and the printed default key sits beside it on the same label.",
+        ),
+        Scheme(
+            Regex("""^(MyAltice|Altice|Optimum)[ _-]?\w*$""", RegexOption.IGNORE_CASE), "Altice",
+            "An Altice/Optimum-supplied gateway on its factory name, with the suffix derived from " +
+                "the unit. Untouched name, very likely untouched admin credentials.",
+        ),
+        Scheme(
+            Regex("""^(Cox|Panoramic|COX-)\w*Wifi\w*$""", RegexOption.IGNORE_CASE), "Cox",
+            "A Cox-supplied gateway on its factory name.",
         ),
         Scheme(
             Regex("""^(BTHub\w*|BTWifi[-\w]*|SKY\w{4,}|TALKTALK[-\w]+|VM\d{6,}|EE-\w+)$""", RegexOption.IGNORE_CASE),

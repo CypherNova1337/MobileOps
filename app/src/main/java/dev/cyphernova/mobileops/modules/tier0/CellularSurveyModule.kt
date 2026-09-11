@@ -24,6 +24,10 @@ import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
 import dev.cyphernova.mobileops.core.radio.CellularIntel
 import dev.cyphernova.mobileops.core.radio.CellularIntel.Generation
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.Executors
+import kotlin.coroutines.resume
 
 /**
  * Enumerates the cellular cells the modem can hear.
@@ -77,8 +81,15 @@ class CellularSurveyModule : PentestModule {
             )
         }
 
-        val raw = runCatching { telephony.allCellInfo }.getOrNull()
-        if (raw.isNullOrEmpty()) {
+        // getAllCellInfo hands back a cache that, on most modems, holds only the serving cell.
+        // requestCellInfoUpdate forces a fresh measurement, and that is what brings the
+        // neighbours back — which is the whole point of surveying rather than just asking where
+        // the phone is attached.
+        val fresh = requestUpdate(telephony)
+        val cached = runCatching { telephony.allCellInfo }.getOrNull().orEmpty()
+        val raw = (fresh.orEmpty() + cached).distinctBy(::identityOf)
+
+        if (raw.isEmpty()) {
             return ModuleOutcome.Failed(
                 "The modem returned no cells. Location services must be on device-wide, and " +
                     "airplane mode switched off.",
@@ -91,6 +102,7 @@ class CellularSurveyModule : PentestModule {
         }
 
         emitCensus(telephony, cells, emit)
+        emitNeighbours(cells, emit)
         emitServingCell(cells, emit)
         emitDowngradeExposure(cells, emit)
 
@@ -189,6 +201,86 @@ class CellularSurveyModule : PentestModule {
     }
 
     /**
+     * Asks the modem to measure again rather than reporting what it last cached.
+     *
+     * Added in Android 10 and rate-limited by the platform, so a null result means "no fresh
+     * measurement this time" rather than a failure — the cached list still stands in.
+     */
+    @SuppressLint("MissingPermission")
+    private suspend fun requestUpdate(telephony: TelephonyManager): List<CellInfo>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return withTimeoutOrNull(UPDATE_TIMEOUT_MS) {
+            suspendCancellableCoroutine { continuation ->
+                val executor = Executors.newSingleThreadExecutor()
+                continuation.invokeOnCancellation { executor.shutdownNow() }
+                val callback = object : TelephonyManager.CellInfoCallback() {
+                    override fun onCellInfo(cellInfo: MutableList<CellInfo>) {
+                        if (continuation.isActive) continuation.resume(cellInfo.toList())
+                    }
+
+                    override fun onError(errorCode: Int, detail: Throwable?) {
+                        if (continuation.isActive) continuation.resume(null)
+                    }
+                }
+                val requested = runCatching { telephony.requestCellInfoUpdate(executor, callback) }
+                if (requested.isFailure && continuation.isActive) continuation.resume(null)
+            }
+        }
+    }
+
+    /** Cells are merged across the cached and fresh lists, so they need comparing by identity. */
+    private fun identityOf(info: CellInfo): String = runCatching {
+        info.cellIdentity.toString()
+    }.getOrDefault(info.toString())
+
+    /**
+     * Neighbours are reported separately from the serving cell because they are what a survey
+     * adds over simply asking the phone where it is attached — and an empty list is itself worth
+     * saying, since it means the modem would not measure rather than that nothing is there.
+     */
+    private suspend fun emitNeighbours(cells: List<Cell>, emit: suspend (Finding) -> Unit) {
+        val neighbours = cells.filterNot { it.registered }
+        if (neighbours.isEmpty()) {
+            emit(
+                Finding(
+                    moduleId = id,
+                    observedAtEpochMs = System.currentTimeMillis(),
+                    severity = Severity.INFO,
+                    title = "No neighbour cells reported",
+                    subject = "Cellular environment",
+                    detail = "The modem returned only the cell it is attached to. Android " +
+                        "rate-limits fresh cell measurements and many modems will not report " +
+                        "neighbours at all while idle, so this is a limit of the handset rather " +
+                        "than evidence that no other cells are in range. Running the module again " +
+                        "after a minute, or while moving, usually turns some up.",
+                    data = mapOf("neighbour_count" to "0"),
+                ),
+            )
+            return
+        }
+
+        emit(
+            Finding(
+                moduleId = id,
+                observedAtEpochMs = System.currentTimeMillis(),
+                severity = Severity.INFO,
+                title = "${neighbours.size} neighbour cell(s)",
+                subject = "Cellular environment",
+                detail = "Cells measured but not attached to: " +
+                    neighbours.joinToString {
+                        "${it.generation.label} ${it.identifier} (${it.operator}, ${it.dbm} dBm)"
+                    } +
+                    ". These are the handover candidates from this position, and together with " +
+                    "the serving cell they are the baseline a later visit is compared against.",
+                data = mapOf(
+                    "neighbour_count" to neighbours.size.toString(),
+                    "neighbours" to neighbours.joinToString { "${it.identifier}@${it.dbm}dBm" },
+                ),
+            ),
+        )
+    }
+
+    /**
      * The platform models each generation with its own identity and signal classes that share no
      * interface, so reading them means naming each one. Every accessor is guarded: which fields
      * a modem populates varies by device, and several were only added to the API later.
@@ -274,4 +366,9 @@ class CellularSurveyModule : PentestModule {
             else -> null
         }
     }.getOrNull()
+
+    private companion object {
+        /** The platform rate-limits these; waiting longer does not produce a result. */
+        const val UPDATE_TIMEOUT_MS = 8_000L
+    }
 }
