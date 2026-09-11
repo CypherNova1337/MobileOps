@@ -239,6 +239,10 @@ class SiteSurveyModule : PentestModule {
                         "sightings" to entry.sightings.toString(),
                         "rssi_max" to entry.strongest.toString(),
                         "rssi_min" to entry.weakest.toString(),
+                        // The classifier's input, carried so a surprising verdict can be checked
+                        // against what the AP actually advertised rather than taken on trust.
+                        "raw_capabilities" to ap.capabilities,
+                        "hidden" to ap.isHidden.toString(),
                     ),
                 ),
             )

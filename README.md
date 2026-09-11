@@ -170,6 +170,7 @@ walking around or on cellular:
 | Works anywhere | Needs a local subnet |
 | --- | --- |
 | **RF site survey** — every AP in range, vendors, channel congestion, security census | Host discovery |
+| **BLE reconnaissance** — every advertising device in range, named and attributed | |
 | WiFi survey and beacon elements — scanning does not require associating | Service & name discovery |
 | Rogue AP correlation | Port scan, TLS audit |
 | Device identity audit | Web exposure, credentials, WPS registrar |
@@ -183,6 +184,20 @@ never has) get their own finding; the rest stay in the census so the report stay
 
 A carrier link hands out a /32, which is point-to-point: no neighbours, nothing to sweep. The LAN
 modules detect that and say so rather than reporting a subnet that does not exist.
+
+## Joining a target network
+
+Survey works from outside; the LAN modules need to be on the network. `t0.wifi.join` bridges the
+two using a per-app association, so the handset keeps whatever connection it had and only this
+app's sockets move to the target. That matters when the phone must stay on cellular, or when
+testing a guest network without giving up the operator's own connection.
+
+The passphrase is entered on the Targets tab when exactly one network is selected, held in memory
+for the association, and never written to the evidence log. An open network needs none. The
+association is dropped by running the module again, and does not survive the app exiting.
+
+Getting on is itself a result: it establishes that those credentials — or none at all — are
+enough to reach the network.
 
 ## Targets
 
@@ -207,6 +222,10 @@ scattered among usable ones.
 
 
 **Tier 0 — passive**
+- `t0.ble.recon` — enumerates BLE devices in range: names, vendors, item trackers, advertised
+  services. Entirely passive, needs no network, reveals what is physically present.
+- `t0.wifi.join` — associates this app with a selected network without changing the phone's own
+  connection, so the LAN modules can run against it. Run again to disconnect.
 - `t0.wifi.sitesurvey` — repeated sweep of the whole RF environment: every AP in range, vendors,
   channel congestion, security census. Needs no network of any kind.
 - `t0.wifi.survey` — grades each AP's advertised security: encryption suite, WPS exposure,

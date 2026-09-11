@@ -55,6 +55,10 @@ class MainActivity : ComponentActivity() {
             add(Manifest.permission.ACCESS_FINE_LOCATION)
             // Android 13 introduced a scanning-specific permission that does not imply location,
             // and a separate opt-in for the capture service's ongoing notification.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // BLE scanning became its own permission in Android 12.
+                add(Manifest.permission.BLUETOOTH_SCAN)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.NEARBY_WIFI_DEVICES)
                 add(Manifest.permission.POST_NOTIFICATIONS)

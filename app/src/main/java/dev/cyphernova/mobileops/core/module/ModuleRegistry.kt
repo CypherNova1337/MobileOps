@@ -1,7 +1,9 @@
 package dev.cyphernova.mobileops.core.module
 
 import dev.cyphernova.mobileops.modules.tier0.DefaultCredentialModule
+import dev.cyphernova.mobileops.modules.tier0.BleReconModule
 import dev.cyphernova.mobileops.modules.tier0.HostDiscoveryModule
+import dev.cyphernova.mobileops.modules.tier0.NetworkJoinModule
 import dev.cyphernova.mobileops.modules.tier0.IdentityAuditModule
 import dev.cyphernova.mobileops.modules.tier0.PortScanModule
 import dev.cyphernova.mobileops.modules.tier0.RogueApModule
@@ -27,6 +29,8 @@ object ModuleRegistry {
         SiteSurveyModule(),
         WifiSurveyModule(),
         RogueApModule(),
+        BleReconModule(),
+        NetworkJoinModule(),
         HostDiscoveryModule(),
         ServiceDiscoveryModule(),
         PortScanModule(),

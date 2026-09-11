@@ -27,8 +27,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.cyphernova.mobileops.core.net.NetworkJoin
 import dev.cyphernova.mobileops.core.target.Target
 import dev.cyphernova.mobileops.modules.tier0.ApObservation
 import dev.cyphernova.mobileops.modules.tier0.ApSecurityAnalyser
@@ -90,6 +92,32 @@ fun TargetsScreen(viewModel: MobileOpsViewModel) {
                 selected = network.key in selected,
                 onToggle = { viewModel.toggleSelection(network) },
             )
+        }
+
+        // Only shown when exactly one network is picked, since that is the only case the join
+        // module accepts. The passphrase is held in memory for the association and never written
+        // to the evidence log.
+        val selectedNetworks = networks.filter { it.key in selected }
+        if (selectedNetworks.size == 1) {
+            item {
+                var passphrase by remember { mutableStateOf(NetworkJoin.passphrase) }
+                Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    OutlinedTextField(
+                        value = passphrase,
+                        onValueChange = {
+                            passphrase = it
+                            NetworkJoin.passphrase = it
+                        },
+                        label = { Text("Passphrase for ${selectedNetworks.single().label}") },
+                        supportingText = {
+                            Text("Leave blank for an open network. Then run 'Join target network'.")
+                        },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
         }
 
         item { SectionHeading("Hosts", hosts.size) }
