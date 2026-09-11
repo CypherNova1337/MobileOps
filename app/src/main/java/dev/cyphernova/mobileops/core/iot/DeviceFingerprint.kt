@@ -25,6 +25,7 @@ object DeviceFingerprint {
         VOIP("VoIP handset or gateway"),
         IOT_BROKER("IoT message broker"),
         IOT_SENSOR("Constrained IoT device"),
+        MEDIA("Media or casting device"),
         NETWORK_DEVICE("Network infrastructure"),
         STORAGE("Network storage"),
         SERVER("General-purpose server"),
@@ -255,9 +256,19 @@ object DeviceFingerprint {
             (Category.IOT_SENSOR to "A constrained IoT device or its gateway."),
         Regex("""synology|\bqnap\b|truenas|freenas|netgear\s?readynas|western\s?digital""") to
             (Category.STORAGE to "Network storage. Worth checking for open shares."),
-        Regex("""cisco|juniper|aruba|fortinet|mikrotik|ruckus|meraki|unifi|switch|router|firewall""") to
+        Regex("""viziocast|chromecast|dial-multiscreen|mediarenderer|airplay|\broku\b|webos|
+            |firetv|appletv|\bsonos\b|smart\s?tv|_hap\._tcp""".trimMargin().replace("\n", "")) to
+            (Category.MEDIA to
+                "A television or casting device. These advertise control APIs that take commands " +
+                    "from anything on the segment without authenticating it, and in a waiting " +
+                    "room or meeting room they have a microphone and a screen other people can " +
+                    "see."),
+        Regex("""cisco|juniper|aruba|fortinet|mikrotik|ruckus|meraki|unifi|switch|router|firewall|
+            |readydlna|readyshare|netgear|dd-wrt|openwrt|tomato|asuswrt|gateway|dlink|tp-link"""
+            .trimMargin().replace("\n", "")) to
             (Category.NETWORK_DEVICE to
                 "Network infrastructure. Its configuration defines the segmentation everything " +
-                    "else depends on."),
+                    "else depends on, and on a consumer unit its administrative interface also " +
+                    "holds the passphrase of every SSID it serves."),
     )
 }

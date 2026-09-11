@@ -3,6 +3,7 @@ package dev.cyphernova.mobileops.modules.tier0
 import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
+import dev.cyphernova.mobileops.core.iot.DeviceEvidence
 import dev.cyphernova.mobileops.core.iot.DeviceFingerprint
 import dev.cyphernova.mobileops.core.iot.IotPorts
 import dev.cyphernova.mobileops.core.module.Intrusiveness
@@ -62,7 +63,7 @@ class PortScanModule : PentestModule {
             // The classifier was previously only reachable from host discovery, which probes a
             // handful of ports — so a scan that pulled "Lexmark MS312dn" out of an FTP banner
             // and found 9100 and 631 alongside it still reported an address with ports open.
-            emit(identityFinding(host, open))
+            emit(identityFinding(context, host, open))
 
             // One finding per host rather than per port. Three hosts produced fourteen notes
             // that each said "a port is open", which is an inventory pretending to be findings.
@@ -78,12 +79,24 @@ class PortScanModule : PentestModule {
     }
 
     /** What the scan says this host is, where the evidence supports saying anything. */
-    private fun identityFinding(host: String, open: List<OpenPort>): Finding {
+    private fun identityFinding(
+        context: ModuleContext,
+        host: String,
+        open: List<OpenPort>,
+    ): Finding {
+        // Pooled with whatever the rest of the run already knows about this host. Classifying on
+        // the port list alone reported the gateway as a workstation and a television as one too,
+        // because the module holding the NetBIOS name and the mDNS service types was not this one.
+        val pooled = DeviceEvidence.forHost(
+            findings = context.priorFindings,
+            address = host,
+            gateway = LocalNetwork.position(context.androidContext)?.gateway,
+        )
         val verdict = DeviceFingerprint.classify(
-            DeviceFingerprint.Evidence(
-                address = host,
-                openPorts = open.map { it.port }.toSet(),
-                banners = open.filter { it.banner.isNotBlank() }.associate { it.port to it.banner },
+            pooled.copy(
+                openPorts = pooled.openPorts + open.map { it.port },
+                banners = pooled.banners +
+                    open.filter { it.banner.isNotBlank() }.associate { it.port to it.banner },
             ),
         )
         return Finding(

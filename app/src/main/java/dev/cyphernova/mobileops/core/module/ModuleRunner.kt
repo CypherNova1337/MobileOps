@@ -67,6 +67,7 @@ class ModuleRunner(private val evidenceStore: EvidenceStore) {
             capabilities = capabilities,
             targets = targets,
             profile = profile,
+            priorFindings = evidenceStore.findings.value,
         )
 
         return runCatching {
