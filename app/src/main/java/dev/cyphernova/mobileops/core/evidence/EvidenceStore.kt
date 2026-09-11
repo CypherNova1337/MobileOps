@@ -1,5 +1,6 @@
 package dev.cyphernova.mobileops.core.evidence
 
+import dev.cyphernova.mobileops.core.iot.DeviceCensus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,9 +51,17 @@ class EvidenceStore(private val directory: File) {
         }
     }
 
-    /** Renders the log as a Markdown report ready to drop into a write-up. */
+    /**
+     * Renders the log as a Markdown report ready to drop into a write-up.
+     *
+     * Device verdicts are recomputed here rather than taken as filed. A module can only classify
+     * from what the log held when it ran, and the evidence that settles what a device is often
+     * arrives from another module seconds later; the report is written once everything has run,
+     * so it is the right place to decide.
+     */
     fun renderReport(findings: List<Finding> = _findings.value): String =
         buildString {
+            @Suppress("NAME_SHADOWING") val findings = DeviceCensus.reclassified(findings)
             appendLine("# MobileOps report")
             appendLine()
             appendLine("Generated ${formatTime(System.currentTimeMillis())}")

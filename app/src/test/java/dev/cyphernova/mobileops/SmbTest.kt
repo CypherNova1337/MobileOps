@@ -55,6 +55,18 @@ class SmbTest {
         "00",
     )
 
+    /**
+     * A Netgear router's Samba, from a live run: it names itself DRIVE as both host and domain,
+     * pads the DNS name pairs with a single space, and claims 6.1 with no build number.
+     */
+    private val sambaChallenge = hex(
+        "000000b6fe534d4240000000160000c00100010001000000000000000000000000000000000000000000" +
+        "00000000000000000000000000000000000000000000000000000900000048006e004e544c4d53535000" +
+        "020000000a000a0038000000058288a2112233445566778800000000000000002c002c00420000000601" +
+        "00000000000f4400520049005600450002000a004400520049005600450001000a004400520049005600" +
+        "450004000200200003000200200000000000",
+    )
+
     private val smb1NegotiateResponse = hex(
         "00000045ff534d4272000000009853c80000000000000000000000000000fffe00000000110000000000" +
         "00000000000000000000000000000000000000000000000000000000000000",
@@ -235,6 +247,41 @@ class SmbTest {
         assertEquals("voidsec.local", challenge.dnsForest)
         assertEquals("10.0 build 20348", challenge.osVersion)
         assertTrue(challenge.isDomainJoined)
+    }
+
+    /**
+     * All three from the same live run against a Netgear router's Samba. Left alone the report
+     * said "DNS domain ' '", invented a domain called DRIVE out of the machine's own name, and
+     * printed "OS version 6.1 build 0" — which reads as Windows 7 about a Linux appliance whose
+     * UPnP banner says ReadyDLNA on a 3.13 kernel.
+     */
+    @Test
+    fun `a name field padded with a space is treated as absent`() {
+        val challenge = Ntlm.Challenge(dnsDomain = " ", dnsComputer = " ")
+        assertFalse(challenge.isDomainJoined)
+        assertFalse(Ntlm.parseChallenge(sambaChallenge)!!.describe().contains("DNS domain"))
+    }
+
+    @Test
+    fun `a machine that answers with its own name is not given a domain it does not have`() {
+        val challenge = Ntlm.parseChallenge(sambaChallenge)!!
+        assertEquals("DRIVE", challenge.netbiosComputer)
+        assertTrue(challenge.isStandalone)
+        assertTrue(challenge.describe().contains("Belongs to no domain"))
+        assertFalse(challenge.describe().contains("Domain or workgroup"))
+    }
+
+    @Test
+    fun `a version with no build number is reported as a claim rather than a windows release`() {
+        val osVersion = Ntlm.parseChallenge(sambaChallenge)!!.osVersion!!
+        assertTrue(osVersion.contains("6.1"))
+        assertFalse("must not read as a real Windows build", osVersion.contains("build 0"))
+        assertTrue(osVersion.contains("Samba"))
+    }
+
+    @Test
+    fun `a real windows build number is reported as one`() {
+        assertEquals("10.0 build 20348", Ntlm.parseChallenge(sessionSetupChallenge)!!.osVersion)
     }
 
     @Test

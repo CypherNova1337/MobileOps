@@ -90,12 +90,25 @@ object Ntlm {
             get() = !dnsDomain.isNullOrBlank() && !dnsComputer.isNullOrBlank() &&
                 !dnsComputer.equals(dnsDomain, ignoreCase = true)
 
+        /**
+         * True when the server names itself as its own domain, which is how a machine that
+         * belongs to no directory answers. Reporting that as a domain would invent one.
+         */
+        val isStandalone: Boolean
+            get() = !netbiosComputer.isNullOrBlank() &&
+                netbiosDomain.equals(netbiosComputer, ignoreCase = true)
+
         fun describe(): String = buildString {
             netbiosComputer?.let { append("Host '$it'. ") }
-            netbiosDomain?.let { append("Domain or workgroup '$it'. ") }
-            dnsDomain?.let { append("DNS domain '$it'. ") }
-            dnsForest?.takeIf { !it.equals(dnsDomain, ignoreCase = true) }
-                ?.let { append("Forest '$it'. ") }
+            if (isStandalone) {
+                append("Belongs to no domain — it answers with its own name. ")
+            } else {
+                netbiosDomain?.let { append("Domain or workgroup '$it'. ") }
+                dnsDomain?.takeIf { !it.equals(netbiosDomain, ignoreCase = true) }
+                    ?.let { append("DNS domain '$it'. ") }
+                dnsForest?.takeIf { !it.equals(dnsDomain, ignoreCase = true) }
+                    ?.let { append("Forest '$it'. ") }
+            }
             osVersion?.let { append("OS version $it. ") }
         }.trim()
     }
@@ -121,11 +134,19 @@ object Ntlm {
 
         // The version block sits between the fixed fields and the payload, and only when the
         // server said it would send one.
+        // A build number makes the version a real Windows release that can be matched against
+        // published advisories. Samba sends a compatibility major/minor with no build at all, and
+        // printing "6.1 build 0" invites a reader to conclude Windows 7 about a Linux appliance.
         val osVersion = if (flags and NEGOTIATE_VERSION != 0 && message.size >= 56) {
             val major = message[48].toInt() and 0xFF
             val minor = message[49].toInt() and 0xFF
             val build = view.getShort(50).toInt() and 0xFFFF
-            "$major.$minor build $build"
+            when {
+                major == 0 -> null
+                build == 0 -> "$major.$minor claimed, with no build number — typically Samba " +
+                    "advertising a Windows compatibility level rather than a Windows release"
+                else -> "$major.$minor build $build"
+            }
         } else {
             null
         }
@@ -154,7 +175,11 @@ object Ntlm {
             if (id == AV_EOL) break
             if (cursor + length > info.size) break
             if (id in TEXT_PAIRS && length > 0) {
-                out[id] = String(info, cursor, length, Charsets.UTF_16LE)
+                // Samba fills unused name pairs with a single space rather than omitting them,
+                // and "DNS domain ' '" in a report reads as a parser bug rather than as the
+                // absence it actually is.
+                val value = String(info, cursor, length, Charsets.UTF_16LE).trim()
+                if (value.isNotEmpty()) out[id] = value
             }
             cursor += length
         }

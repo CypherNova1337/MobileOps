@@ -206,7 +206,11 @@ class PortScanModule : PentestModule {
     private fun noteFor(port: Int): String? = when (port) {
         23 -> "Telnet transmits credentials in cleartext."
         21 -> "FTP transmits credentials in cleartext unless FTPS is enforced."
-        445, 139 -> "SMB exposed on the LAN; confirm signing is required and v1 is disabled."
+        // Not "confirm signing is required and v1 is disabled" any more: the SMB exposure module
+        // answers both, so saying it here only hands work back that the tool already does.
+        445, 139 -> "SMB exposed on the LAN. Run the SMB exposure module against this host for " +
+            "the signing policy, whether SMB1 is still enabled, and whether it accepts a null " +
+            "session."
         3389 -> "RDP exposed; confirm NLA is required."
         5900 -> "VNC often ships without transport encryption."
         80, 8080, 8000 -> "Cleartext HTTP; confirm whether it redirects to TLS."
