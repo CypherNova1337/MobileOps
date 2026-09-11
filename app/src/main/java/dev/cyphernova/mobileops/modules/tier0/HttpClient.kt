@@ -28,6 +28,8 @@ object LanHttpClient {
         authorization: String? = null,
         followRedirects: Boolean = false,
         timeoutMs: Int = 5_000,
+        body: ByteArray? = null,
+        headers: Map<String, String> = emptyMap(),
     ): HttpResponse? = withContext(Dispatchers.IO) {
         val started = System.currentTimeMillis()
         runCatching {
@@ -39,6 +41,12 @@ object LanHttpClient {
                 setRequestProperty("User-Agent", USER_AGENT)
                 setRequestProperty("Accept", "*/*")
                 authorization?.let { setRequestProperty("Authorization", it) }
+                headers.forEach { (name, value) -> setRequestProperty(name, value) }
+
+                if (body != null) {
+                    doOutput = true
+                    setFixedLengthStreamingMode(body.size)
+                }
 
                 if (this is HttpsURLConnection) {
                     sslSocketFactory = permissiveContext.socketFactory
@@ -46,14 +54,18 @@ object LanHttpClient {
                 }
             }
 
+            body?.let { payload ->
+                connection.outputStream.use { it.write(payload) }
+            }
+
             val status = connection.responseCode
-            val headers = connection.headerFields
+            val responseHeaders = connection.headerFields
                 .filterKeys { it != null }
                 .map { (key, values) -> key.lowercase() to values.joinToString(", ") }
                 .toMap()
 
             val stream = if (status in 200..399) connection.inputStream else connection.errorStream
-            val body = stream?.use { input ->
+            val responseBody = stream?.use { input ->
                 // Bounded: a probe should not pull a firmware image into memory.
                 val buffer = ByteArray(MAX_BODY_BYTES)
                 var total = 0
@@ -66,7 +78,7 @@ object LanHttpClient {
             }.orEmpty()
 
             connection.disconnect()
-            HttpResponse(status, headers, body, System.currentTimeMillis() - started)
+            HttpResponse(status, responseHeaders, responseBody, System.currentTimeMillis() - started)
         }.getOrNull()
     }
 

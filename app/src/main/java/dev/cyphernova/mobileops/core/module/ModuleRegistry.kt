@@ -9,6 +9,7 @@ import dev.cyphernova.mobileops.modules.tier0.ServiceDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.TlsAuditModule
 import dev.cyphernova.mobileops.modules.tier0.TlsInterceptModule
 import dev.cyphernova.mobileops.modules.tier0.WebExposureModule
+import dev.cyphernova.mobileops.modules.tier0.WpsRegistrarModule
 import dev.cyphernova.mobileops.modules.tier0.VpnCaptureModule
 import dev.cyphernova.mobileops.modules.tier0.WifiSurveyModule
 import dev.cyphernova.mobileops.modules.tier1.IdentitySpoofModule
@@ -30,6 +31,7 @@ object ModuleRegistry {
         TlsAuditModule(),
         WebExposureModule(),
         DefaultCredentialModule(),
+        WpsRegistrarModule(),
         VpnCaptureModule(),
         TlsInterceptModule(),
         IdentityAuditModule(),

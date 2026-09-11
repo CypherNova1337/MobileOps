@@ -190,6 +190,8 @@ halfway still parses up to the last complete record) and exports as a Markdown r
   version control, version-disclosing banners, missing security headers. GET requests only.
 - `t0.exploit.defaultcreds` — tests vendor default credentials against HTTP Basic auth. Stops at
   the first pair that works.
+- `t0.exploit.wpsregistrar` — tests whether the WPS External Registrar answers unauthenticated
+  over UPnP. The one WPS attack surface reachable without monitor mode.
 
 **Tier 1**
 - `t1.capture.pcap` — tcpdump on a live interface. Managed mode, so this sees the device's own
@@ -217,6 +219,28 @@ exploit modules are scoped to what proves a finding and stops:
 
 Both stop at demonstration. Neither pivots, persists, or modifies the target.
 
+### WiFi attacks and what a phone can reach
+
+Every classic WiFi attack needs to transmit or receive raw 802.11 frames, which means monitor
+mode and injection — Tier 2, and unreachable on a stock handset at any tier below it:
+
+| Attack | Needs | On a stock phone |
+| --- | --- | --- |
+| Deauthentication | Injection | No |
+| WPA handshake capture | Monitor mode | No |
+| PMKID capture | Injection | No |
+| WPS PIN / Pixie Dust over the air | Injection | No |
+| Evil twin / karma | SoftAP with a chosen SSID | No — the platform picks the SSID |
+
+The exception is **WPS over UPnP**. The Wi-Fi Alliance defined the External Registrar protocol
+over UPnP/SOAP as well as over 802.11, and consumer routers enable it on the LAN by default. That
+path is ordinary HTTP, so `t0.exploit.wpsregistrar` reaches it from an unrooted phone — and it
+sits on a different code path from the radio-side PIN lock, so an AP refusing PIN attempts over
+the air can still answer here.
+
+Offline work is also unconstrained by the radio: a handshake or PMKID captured on other hardware
+can be cracked on the phone, since that is compute rather than RF.
+
 ### Deliberately not implemented
 
 Frame injection, and deauthentication in particular. A deauth flood is a denial-of-service
@@ -230,7 +254,7 @@ Requires JDK 17+ and the Android SDK (compileSdk 35, build-tools 35.0.0). Point 
 
 ```
 gradle assembleDebug          # → app/build/outputs/apk/debug/app-debug.apk
-gradle testDebugUnitTest      # 102 tests: packet codec, beacon IEs, TLS/SNI, CA, name codecs
+gradle testDebugUnitTest      # 134 tests: packet codec, beacon IEs, TLS/SNI, CA, UPnP/WPS
 ```
 
 `minSdk` is 26, `targetSdk` 35.
