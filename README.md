@@ -140,6 +140,14 @@ installer via `KeyChain.createInstallIntent()`. Some Android releases route CA i
 through Settings regardless, in which case the app says so and opens the right screen rather than
 failing quietly.
 
+It installs once. The CA is generated on first use and persisted, so the same certificate is
+reused for the life of the install, and the card reads the device trust store to see where it
+stands — `Install CA`, `CA installed ✓` (disabled), or `Clean up N CA copies` when entries from an
+earlier CA are still present. Trust is matched on the certificate bytes, not its name, so a
+regenerated CA is correctly reported as untrusted rather than mistaken for the one already there.
+An app cannot delete a user-installed CA, so the cleanup path opens Settings rather than
+pretending otherwise.
+
 The middle row is the one that surprises people: since Android 7, apps trust user-installed CAs
 only if their network security config opts in, and almost none do. So a user-installed CA is a
 browser-traffic tool. `t0.tls.intercept` reports the exact filename the system store keys on

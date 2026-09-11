@@ -11,6 +11,7 @@ import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
 import dev.cyphernova.mobileops.core.tls.CertificateAuthority
 import dev.cyphernova.mobileops.core.tls.InterceptController
+import dev.cyphernova.mobileops.core.tls.TrustStore
 import java.io.File
 import java.security.MessageDigest
 
@@ -73,12 +74,15 @@ class TlsInterceptModule : PentestModule {
                 severity = Severity.INFO,
                 title = "TLS interception armed",
                 subject = CertificateAuthority.CA_COMMON_NAME,
-                detail = "Local CA ready. Tap 'Install CA' on this card to hand it straight to the " +
+                detail = trustLine(certificate) +
+                    "Tap 'Install CA' on this card to hand it straight to the " +
                     "system certificate installer. If the installer sends you to Settings instead, " +
                     "the PEM is at ${authority.exportedCertificateFile.absolutePath} and can be " +
                     "shared from the Evidence tab.\n\n" +
                     trustStoreNote(authority),
                 data = mapOf(
+                    "ca_trusted" to TrustStore.status(certificate).trusted.toString(),
+                    "ca_copies_installed" to TrustStore.status(certificate).copies.toString(),
                     "ca_sha256" to fingerprint,
                     "ca_pem_path" to authority.exportedCertificateFile.absolutePath,
                     "system_store_filename" to (authority.systemTrustStoreName() ?: ""),
@@ -93,6 +97,20 @@ class TlsInterceptModule : PentestModule {
             " Start a capture to begin intercepting."
         }
         return ModuleOutcome.Completed("Interception armed; install the CA.$note")
+    }
+
+    /** Leads with where the CA stands, because an untrusted CA is why interception sees nothing. */
+    private fun trustLine(certificate: java.security.cert.X509Certificate): String {
+        val status = TrustStore.status(certificate)
+        return when {
+            status.hasStaleCopies ->
+                "This CA is trusted, but ${status.copies} entries with its name are installed — " +
+                    "older ones left behind. Remove the extras under Settings → Security → " +
+                    "Trusted credentials → User. "
+            status.trusted -> "This CA is already installed and trusted; no need to install it again. "
+            else -> "This CA is not yet trusted by the device, so every handshake will be refused " +
+                "until it is installed. "
+        }
     }
 
     /**

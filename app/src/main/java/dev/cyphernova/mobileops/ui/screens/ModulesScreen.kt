@@ -203,8 +203,28 @@ private fun ModuleCard(state: ModuleState, viewModel: MobileOpsViewModel) {
                 }
 
                 if (module.id == INTERCEPT_MODULE_ID && viewModel.caCertificateDer() != null) {
+                    // Re-read on each recomposition: the operator may have installed or removed
+                    // the certificate in Settings since this card was last drawn.
+                    val trust = remember(state.lastOutcome, state.running) { viewModel.caTrustStatus() }
+
                     OutlinedButton(
+                        enabled = !trust.trusted || trust.hasStaleCopies,
                         onClick = {
+                            if (trust.hasStaleCopies) {
+                                // An app cannot delete a user CA; only the person holding the
+                                // device can, so point them at the screen that does it.
+                                Toast.makeText(
+                                    context,
+                                    "${trust.copies} copies installed — remove the old ones under " +
+                                        "Trusted credentials → User",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                runCatching {
+                                    context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                                }
+                                return@OutlinedButton
+                            }
+
                             val der = viewModel.caCertificateDer()
                             if (der == null) {
                                 Toast.makeText(context, "No CA yet — run the module first", Toast.LENGTH_SHORT).show()
@@ -238,7 +258,15 @@ private fun ModuleCard(state: ModuleState, viewModel: MobileOpsViewModel) {
                                 }
                             }
                         },
-                    ) { Text("Install CA") }
+                    ) {
+                        Text(
+                            when {
+                                trust.hasStaleCopies -> "Clean up ${trust.copies} CA copies"
+                                trust.trusted -> "CA installed ✓"
+                                else -> "Install CA"
+                            },
+                        )
+                    }
                 }
 
                 if (state.running) {

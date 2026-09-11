@@ -13,6 +13,10 @@ import dev.cyphernova.mobileops.core.identity.DeviceProfile
 import dev.cyphernova.mobileops.core.identity.DeviceProfiles
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.tls.InterceptController
+import dev.cyphernova.mobileops.core.tls.TrustStatus
+import dev.cyphernova.mobileops.core.tls.TrustStore
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
 import dev.cyphernova.mobileops.core.module.Blocker
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.ModuleRegistry
@@ -249,6 +253,18 @@ class MobileOpsViewModel(application: Application) : AndroidViewModel(applicatio
     fun caCertificateFile(): File? =
         File(File(getApplication<Application>().filesDir, "tls"), "MobileOps-CA.pem")
             .takeIf { it.exists() }
+
+    /** Whether this device already trusts our CA, and whether stale copies are lying around. */
+    fun caTrustStatus(): TrustStatus =
+        caCertificate()?.let(TrustStore::status) ?: TrustStatus.UNKNOWN
+
+    private fun caCertificate(): X509Certificate? {
+        val der = caCertificateDer() ?: return null
+        return runCatching {
+            CertificateFactory.getInstance("X.509")
+                .generateCertificate(der.inputStream()) as X509Certificate
+        }.getOrNull()
+    }
 
     /**
      * The CA as raw DER, which is what the system certificate installer expects — it takes the
