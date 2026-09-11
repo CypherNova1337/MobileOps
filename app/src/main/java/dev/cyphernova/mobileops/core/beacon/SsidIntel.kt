@@ -231,5 +231,23 @@ object SsidIntel {
                 "camera systems tells an outsider exactly which one matters before they are on it.",
         Regex("""\b(hospital|clinic|school|library|police|fire|bank)\b""", RegexOption.IGNORE_CASE) to
             "The name identifies the operating organisation and its sector.",
+        Regex(
+            """\b(biomed|clinical|telemetry|tele|nursecall|nurse|pyxis|omnicell|alaris|
+                |epic|cerner|meditech|pacs|radiology|imaging|infusion|patient|ward|theatre|icu)\b"""
+                .trimMargin().replace("\n", ""),
+            RegexOption.IGNORE_CASE,
+        ) to
+            "The name marks this as a clinical or biomedical network. That is the segment " +
+                "carrying patient data and connected medical equipment, and naming it says so to " +
+                "anyone in the car park — an SSID is the one thing a network broadcasts to people " +
+                "who have no access to it at all.",
+        Regex(
+            """\b(bms|bas|hvac|chiller|boiler|plant|scada|plc|ot|process|energy|
+                |lighting|access|badge|door|elevator|lift)\b""".trimMargin().replace("\n", ""),
+            RegexOption.IGNORE_CASE,
+        ) to
+            "The name marks this as building management or operational technology. Those " +
+                "networks run physical systems and are routinely flat and unauthenticated " +
+                "underneath, on the assumption nobody can reach them.",
     )
 }

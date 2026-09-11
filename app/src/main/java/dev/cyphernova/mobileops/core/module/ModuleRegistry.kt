@@ -6,6 +6,7 @@ import dev.cyphernova.mobileops.modules.tier0.BluetoothClassicModule
 import dev.cyphernova.mobileops.modules.tier0.CellularSurveyModule
 import dev.cyphernova.mobileops.modules.tier0.HandshakeCrackModule
 import dev.cyphernova.mobileops.modules.tier0.HostDiscoveryModule
+import dev.cyphernova.mobileops.modules.tier0.IotDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.NetworkJoinModule
 import dev.cyphernova.mobileops.modules.tier0.IdentityAuditModule
 import dev.cyphernova.mobileops.modules.tier0.PortScanModule
@@ -47,6 +48,7 @@ object ModuleRegistry {
         HostDiscoveryModule(),
         ServiceDiscoveryModule(),
         PortScanModule(),
+        IotDiscoveryModule(),
         TlsAuditModule(),
         WebExposureModule(),
         DefaultCredentialModule(),

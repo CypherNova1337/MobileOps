@@ -291,6 +291,10 @@ scattered among usable ones.
   a /16 sweep is 65k probes and a flat battery.
 - `t0.net.portscan` — connect-scans a well-known port set on the selected hosts, with banner
   grabbing. A full handshake lands in the target's logs; SYN scanning needs Tier 1.
+- `t0.iot.discovery` — identifies **equipment** rather than ports: DICOM, HL7, BACnet, Modbus,
+  MQTT, CoAP, RTSP, Niagara Fox, EtherNet/IP and the rest a top-1000 list misses. Speaks each
+  protocol well enough to make the device identify itself, then says what it is and why it
+  matters. Backs off automatically on fragile devices.
 - `t0.tls.audit` — negotiated protocol and cipher, certificate expiry, self-signed chains, SHA-1
   and MD5 signatures.
 - `t0.exploit.webexposure` — unauthenticated admin pages, directory listings, exposed config and
@@ -314,6 +318,45 @@ scattered among usable ones.
 **Tier 2**
 - `t2.radio.monitor` — verifies a radio really enters monitor mode and enumerates the channels
   the driver reports.
+
+## IoT and OT
+
+On most sites the general-purpose scan *is* the assessment. On a site whose value is in its
+devices — a hospital, a plant, a warehouse, a building with a serious BMS — it is the least
+interesting part, because the equipment does not speak SSH or HTTP. It speaks DICOM, BACnet,
+Modbus, HL7, MQTT, and a top-1000 port list contains none of them.
+
+`t0.iot.discovery` scans the catalogue those protocols live in and speaks each one well enough
+to make the device identify itself:
+
+| Protocol | Probe | What it establishes |
+| --- | --- | --- |
+| DICOM | A-ASSOCIATE-RQ (C-ECHO) | Whether an imaging node accepts an association from an AE title it has never seen — DICOM's default access control is a name the *caller* chooses |
+| HL7 MLLP | Port presence | A clinical interface carrying admissions, orders and results in cleartext with no transport authentication |
+| BACnet | Who-Is | Building automation answering unauthenticated discovery. Base BACnet has no authentication at all |
+| Modbus | Read Device Identification | Vendor, product and revision from a protocol with no authentication in it |
+| MQTT | CONNECT with no credentials | Whether the broker accepts anonymous clients, which means subscribing to `#` returns the whole estate |
+| CoAP | `GET /.well-known/core` | The device's complete resource map |
+| RTSP | OPTIONS | Whether a camera stream is readable without credentials |
+
+Then it classifies the host — imaging node, chiller controller, camera, interface engine — and
+reports what the thing *is*, not which ports answered.
+
+### Why it is deliberately slow
+
+A great deal of operational and medical equipment runs a TCP stack written for a network where
+nobody was rude, and will fault, reboot or stop answering under a scan a server would not
+notice. In a clinical setting that is not a finding, it is a patient safety event.
+
+So every port in the catalogue carries a fragility rating, and the moment anything on a host
+looks like equipment the scanner drops to one connection at a time, stops grabbing banners, and
+speaks only the read-defined exchange each protocol specifies. Findings on such a host also
+carry an explicit warning not to point a general-purpose scanner at it.
+
+**Every probe is read-only, and the encoders cannot express a write.** Modbus will set a coil for
+anyone who asks, BACnet will write a setpoint, DICOM will accept a study. Where those control a
+chiller, a room's pressure differential or an infusion, a write issued to see what happens is not
+a test result — so there is no write path in the file to reach for under time pressure.
 
 ## Exploitation
 
