@@ -117,20 +117,70 @@ object Pjl {
             Entry(name, size, type.equals("DIR", ignoreCase = true))
         }
 
-    /**
-     * Settings that matter to an assessor rather than to whoever is printing.
-     *
-     * A stored-job password, an SMTP or LDAP server the device authenticates to, and a disk that
-     * is not encrypted are the three that turn a printer from an inventory line into a route
-     * further into the estate.
-     */
-    fun notableSettings(settings: Map<String, String>): Map<String, String> = settings
-        .filterKeys { key ->
-            NOTABLE.any { key.contains(it, ignoreCase = true) }
-        }
+    /** What a setting means for the assessment, rather than for whoever is printing. */
+    enum class Concern {
+        /** No PJL password, so the device takes configuration changes from anyone. */
+        NO_PJL_PASSWORD,
 
-    private val NOTABLE = listOf(
-        "PASSWORD", "SMTP", "LDAP", "KERBEROS", "DOMAIN", "ADMIN",
-        "DISKLOCK", "ENCRYPT", "SECURITY", "JOBSTORAGE", "HOLDJOB",
+        /** Stored jobs and scans sit on storage that is not locked or encrypted. */
+        STORAGE_UNPROTECTED,
+
+        /** The device is configured to authenticate to something else on the network. */
+        REACHES_SERVER,
+    }
+
+    /** One setting worth reporting, with what its value actually means. */
+    data class Note(
+        val key: String,
+        val value: String,
+        val concern: Concern,
+        val meaning: String,
     )
+
+    /**
+     * The settings that change what an assessor should do next.
+     *
+     * A keyword match alone is not enough, and reporting one is how a printer with `PASSWORD=
+     * DISABLED` gets written up under a paragraph about stored scan-to-folder credentials it does
+     * not have. What matters is the value: a mail server name means the device holds an account
+     * somewhere else, while a password feature switched off means the device itself is open.
+     */
+    fun concerns(settings: Map<String, String>): List<Note> = settings.mapNotNull { (key, raw) ->
+        val value = raw.trim().trim('"')
+        val off = value.isBlank() || value.uppercase() in OFF_VALUES
+
+        when {
+            key.contains("PASSWORD", ignoreCase = true) && off -> Note(
+                key, value, Concern.NO_PJL_PASSWORD,
+                "no PJL password is set, so any device on this segment can change this " +
+                    "printer's defaults and panel message, not merely read them",
+            )
+
+            (key.contains("DISKLOCK", ignoreCase = true) ||
+                key.contains("ENCRYPT", ignoreCase = true)) && off -> Note(
+                key, value, Concern.STORAGE_UNPROTECTED,
+                "the printer's storage is not protected, so held jobs and scans on it survive " +
+                    "in readable form",
+            )
+
+            // A server name is only a finding when there is a name. The same key set to nothing
+            // is the feature being unconfigured, which is the opposite of a finding.
+            SERVER_KEYS.any { key.contains(it, ignoreCase = true) } && !off && looksLikeHost(value) ->
+                Note(
+                    key, value, Concern.REACHES_SERVER,
+                    "the printer authenticates to '$value', so it stores an account for that " +
+                        "system in a form it can replay — and that account is usually on the " +
+                        "file server or the mail system rather than on the printer",
+                )
+
+            else -> null
+        }
+    }
+
+    private fun looksLikeHost(value: String): Boolean =
+        value.length > 1 && (value.contains('.') || value.contains(':') || value.contains('\\'))
+
+    private val OFF_VALUES = setOf("DISABLED", "OFF", "NONE", "NO", "0", "FALSE", "UNSET")
+
+    private val SERVER_KEYS = listOf("SMTP", "LDAP", "KERBEROS", "DOMAIN", "MAILSERVER", "SMB")
 }

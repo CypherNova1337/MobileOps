@@ -85,6 +85,10 @@ class SmbAssessmentModule : PentestModule {
                 if (assessment.shares.isNotEmpty()) {
                     weak++
                     emit(shareFinding(host, assessment.shares))
+                } else {
+                    // Reported rather than dropped: an empty share list and a refused enumeration
+                    // look identical in a report, and only one of them is the server holding firm.
+                    emit(shareLookupFinding(host, assessment.shareLookupStoppedAt))
                 }
             }
             assessment.challenge?.let { emit(disclosureFinding(host, it)) }
@@ -131,6 +135,7 @@ class SmbAssessmentModule : PentestModule {
         val challenge: Ntlm.Challenge?,
         val nullSession: Boolean,
         val shares: List<SrvSvc.Share> = emptyList(),
+        val shareLookupStoppedAt: String? = null,
     )
 
     private suspend fun assess(host: String): Assessment? = withContext(Dispatchers.IO) {
@@ -145,6 +150,7 @@ class SmbAssessmentModule : PentestModule {
         var challenge: Ntlm.Challenge? = null
         var nullSession = false
         var shares: List<SrvSvc.Share> = emptyList()
+        var shareStop: String? = null
 
         runCatching {
             Socket().use { socket ->
@@ -178,51 +184,96 @@ class SmbAssessmentModule : PentestModule {
                 // Only worth asking once the session exists. "Null session accepted" is a
                 // statement about what might be reachable; the share list is what is.
                 if (nullSession) {
-                    shares = enumerateShares(socket, host, sessionId)
+                    val attempt = enumerateShares(socket, host, sessionId)
+                    shares = attempt.shares
+                    shareStop = attempt.stoppedAt
                 }
             }
         }
 
         if (!smb1 && negotiated == null) return@withContext null
-        Assessment(port, smb1, negotiated, challenge, nullSession, shares)
+        Assessment(port, smb1, negotiated, challenge, nullSession, shares, shareStop)
+    }
+
+    /** How far the share enumeration got, and what stopped it. */
+    private data class ShareAttempt(
+        val shares: List<SrvSvc.Share> = emptyList(),
+        val stoppedAt: String? = null,
+    ) {
+        val succeeded: Boolean get() = stoppedAt == null
     }
 
     /**
      * Asks the server what it is sharing, over the `srvsvc` pipe on IPC$.
      *
      * Four steps, each of which can legitimately fail on a hardened host: connect to IPC$, open
-     * the pipe, bind to the interface, make the call. A refusal at any of them is an answer — it
-     * means the null session exists but cannot enumerate — so none of them is an error.
+     * the pipe, bind to the interface, make the call. A refusal at any of them is an answer — the
+     * null session exists but cannot enumerate — so none of them is an error, and every one of
+     * them says which it was rather than returning an empty list that reads as "no shares".
      */
-    private fun enumerateShares(socket: Socket, host: String, sessionId: Long): List<SrvSvc.Share> {
+    private fun enumerateShares(socket: Socket, host: String, sessionId: Long): ShareAttempt {
         val tree = roundTrip(
             socket,
             Smb.smb2TreeConnectRequest(host, "IPC$", messageId = 3, sessionId = sessionId),
-        ) ?: return emptyList()
-        if (Smb.statusOf(tree) != Smb.STATUS_SUCCESS) return emptyList()
+        ) ?: return ShareAttempt(stoppedAt = "IPC\$ tree connect got no reply")
+        val treeStatus = Smb.statusOf(tree)
+        if (treeStatus != Smb.STATUS_SUCCESS) {
+            return ShareAttempt(stoppedAt = "IPC\$ tree connect refused (${status(treeStatus)})")
+        }
         val treeId = Smb.treeIdOf(tree)
 
         val create = roundTrip(
             socket,
             Smb.smb2CreateRequest("srvsvc", messageId = 4, sessionId = sessionId, treeId = treeId),
-        ) ?: return emptyList()
-        val fileId = Smb.fileIdOf(create) ?: return emptyList()
+        ) ?: return ShareAttempt(stoppedAt = "opening the srvsvc pipe got no reply")
+        val fileId = Smb.fileIdOf(create)
+            ?: return ShareAttempt(
+                stoppedAt = "the srvsvc pipe would not open (${status(Smb.statusOf(create))})",
+            )
 
         val bind = roundTrip(
             socket,
             Smb.smb2PipeTransceiveRequest(
                 fileId, SrvSvc.bindRequest(), messageId = 5, sessionId, treeId,
             ),
-        ) ?: return emptyList()
-        if (!SrvSvc.isBindAccepted(Smb.ioctlOutput(bind) ?: return emptyList())) return emptyList()
+        ) ?: return ShareAttempt(stoppedAt = "the RPC bind got no reply")
+        val bindOutput = Smb.ioctlOutput(bind)
+            ?: return ShareAttempt(
+                stoppedAt = "the RPC bind returned nothing (${status(Smb.statusOf(bind))})",
+            )
+        if (!SrvSvc.isBindAccepted(bindOutput)) {
+            return ShareAttempt(stoppedAt = "the server declined to bind to srvsvc")
+        }
 
         val call = roundTrip(
             socket,
             Smb.smb2PipeTransceiveRequest(
                 fileId, SrvSvc.netShareEnumRequest(host), messageId = 6, sessionId, treeId,
             ),
-        ) ?: return emptyList()
-        return SrvSvc.parseShares(Smb.ioctlOutput(call) ?: return emptyList())
+        ) ?: return ShareAttempt(stoppedAt = "NetrShareEnum got no reply")
+        val output = Smb.ioctlOutput(call)
+            ?: return ShareAttempt(
+                stoppedAt = "NetrShareEnum returned nothing (${status(Smb.statusOf(call))})",
+            )
+        val shares = SrvSvc.parseShares(output)
+        if (shares.isEmpty()) {
+            return ShareAttempt(
+                stoppedAt = "NetrShareEnum answered with no readable entries " +
+                    "(${output.size} bytes)",
+            )
+        }
+        return ShareAttempt(shares)
+    }
+
+    /** An NTSTATUS by the name an assessor would look up, falling back to the number. */
+    private fun status(code: Int?): String = when (code) {
+        null -> "no status"
+        Smb.STATUS_SUCCESS -> "success"
+        Smb.STATUS_ACCESS_DENIED -> "STATUS_ACCESS_DENIED"
+        Smb.STATUS_LOGON_FAILURE -> "STATUS_LOGON_FAILURE"
+        Smb.STATUS_BAD_NETWORK_NAME -> "STATUS_BAD_NETWORK_NAME"
+        Smb.STATUS_NOT_FOUND -> "STATUS_NOT_FOUND"
+        else -> "0x%08x".format(code)
     }
 
     private fun reachable(host: String, port: Int): Boolean = runCatching {
@@ -418,6 +469,27 @@ class SmbAssessmentModule : PentestModule {
             "file_shares" to shares.filter { it.holdsFiles && !it.isAdministrative }
                 .joinToString { it.name },
         ).filterValues { it.isNotBlank() },
+    )
+
+    /**
+     * Why the share list is absent.
+     *
+     * Without this, a server that refused the enumeration and a server with nothing shared
+     * produce the same report — and only one of those is the configuration holding.
+     */
+    private fun shareLookupFinding(host: String, stoppedAt: String?) = Finding(
+        moduleId = id,
+        observedAtEpochMs = System.currentTimeMillis(),
+        severity = Severity.INFO,
+        title = "Null session could not list shares on $host",
+        subject = host,
+        detail = "The anonymous session was granted, but enumerating shares over srvsvc did not " +
+            "complete: " + (stoppedAt ?: "no reason was recorded") + ". The session itself is " +
+            "still the finding above; this says the server did not go on to hand over its share " +
+            "list, which is the restriction working. Listing shares by name over SMB1 — which " +
+            "this host still speaks — is the next thing to try by hand.",
+        data = mapOf("host" to host, "stopped_at" to stoppedAt.orEmpty())
+            .filterValues { it.isNotBlank() },
     )
 
     private fun nullSessionFinding(host: String, challenge: Ntlm.Challenge?) = Finding(

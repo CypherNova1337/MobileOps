@@ -68,9 +68,14 @@ class PrinterModule : PentestModule {
         printers.forEach { host ->
             var spokeToThis = false
 
-            queryIpp(host)?.let { attributes ->
+            val ipp = queryIpp(host)
+            if (ipp.attributes != null) {
                 spokeToThis = true
-                emit(ippFinding(host, attributes))
+                emit(ippFinding(host, ipp.attributes))
+            } else if (ipp.attempts.isNotEmpty()) {
+                // 631 being open and IPP returning nothing is a fact worth recording. Silence
+                // here is indistinguishable from the module not having looked.
+                emit(ippSilentFinding(host, ipp.attempts))
             }
 
             queryPjl(host)?.let { blocks ->
@@ -81,8 +86,8 @@ class PrinterModule : PentestModule {
 
                 emit(pjlFinding(host, model, settings, files))
 
-                val notable = Pjl.notableSettings(settings)
-                if (notable.isNotEmpty()) emit(settingsFinding(host, notable))
+                val concerns = Pjl.concerns(settings)
+                if (concerns.isNotEmpty()) emit(settingsFinding(host, concerns))
                 if (files.isNotEmpty()) emit(storageFinding(host, files))
             }
 
@@ -115,24 +120,45 @@ class PrinterModule : PentestModule {
             .distinct()
     }
 
-    private suspend fun queryIpp(host: String): Ipp.Attributes? {
-        // Both paths are in wide use and a device serves one or the other, not both.
+    /** What the IPP query got, including the reasons it got nothing. */
+    private data class IppResult(
+        val attributes: Ipp.Attributes? = null,
+        val attempts: List<String> = emptyList(),
+    )
+
+    private suspend fun queryIpp(host: String): IppResult {
+        val attempts = mutableListOf<String>()
+        // Devices serve one of these paths, not all of them, and which one is not predictable
+        // from the model — so each is tried and each outcome recorded.
         IPP_PATHS.forEach { path ->
-            val response = LanHttpClient.probe(
-                url = "http://$host:$IPP_PORT$path",
+            val url = "http://$host:$IPP_PORT$path"
+            val attempt = LanHttpClient.attempt(
+                url = url,
                 method = "POST",
                 timeoutMs = REQUEST_TIMEOUT_MS,
-                body = Ipp.getPrinterAttributesRequest("ipp://$host$path"),
+                body = Ipp.getPrinterAttributesRequest("ipp://$host:$IPP_PORT$path"),
                 headers = mapOf("Content-Type" to "application/ipp"),
-            ) ?: return@forEach
-            // The body is binary, and it came back through a client that decoded it as Latin-1,
+            )
+            val response = (attempt as? LanHttpClient.Attempt.Answered)?.response
+            if (response == null) {
+                attempts += attempt.describe()
+                return@forEach
+            }
+            // The body is binary and came back through a client that decoded it as Latin-1,
             // which round-trips every byte.
             val attributes = Ipp.parse(response.body.toByteArray(Charsets.ISO_8859_1))
-            if (attributes != null && attributes.isSuccess && attributes.values.isNotEmpty()) {
-                return attributes
+            when {
+                attributes == null ->
+                    attempts += "$url — HTTP ${response.status}, " +
+                        "${response.body.length} bytes that did not decode as IPP"
+                !attributes.isSuccess ->
+                    attempts += "$url — IPP status 0x%04x".format(attributes.statusCode)
+                attributes.values.isEmpty() ->
+                    attempts += "$url — IPP answered with no attributes"
+                else -> return IppResult(attributes, attempts + "$url — answered")
             }
         }
-        return null
+        return IppResult(null, attempts)
     }
 
     private suspend fun queryPjl(host: String): List<Pjl.Block>? = withContext(Dispatchers.IO) {
@@ -200,6 +226,21 @@ class PrinterModule : PentestModule {
         ).filterValues { it.isNotBlank() },
     )
 
+    private fun ippSilentFinding(host: String, attempts: List<String>) = Finding(
+        moduleId = id,
+        observedAtEpochMs = System.currentTimeMillis(),
+        severity = Severity.INFO,
+        title = "IPP did not answer on $host",
+        subject = host,
+        detail = "Get-Printer-Attributes was sent and no usable reply came back. What each " +
+            "attempt did: " + attempts.joinToString("; ") + ". A refused connection means 631 " +
+            "is not serving IPP; an HTTP status with a body that did not decode means the path " +
+            "is wrong for this model; an IPP error status means the device answered and " +
+            "declined. Any of those is worth a look by hand before concluding the printer is " +
+            "reticent.",
+        data = mapOf("host" to host, "attempted" to attempts.joinToString("; ")),
+    )
+
     private fun pjlFinding(
         host: String,
         model: String?,
@@ -230,21 +271,29 @@ class PrinterModule : PentestModule {
         ).filterValues { it.isNotBlank() },
     )
 
-    private fun settingsFinding(host: String, notable: Map<String, String>) = Finding(
+    /**
+     * Settings that change what to do next, and what each value means.
+     *
+     * Severity follows the concern rather than the keyword: a printer naming a mail server holds
+     * someone else's account, which is a different finding from a printer whose own password
+     * feature is switched off.
+     */
+    private fun settingsFinding(host: String, concerns: List<Pjl.Note>) = Finding(
         moduleId = id,
         observedAtEpochMs = System.currentTimeMillis(),
-        severity = Severity.HIGH,
-        title = "Printer discloses its security configuration — $host",
+        severity = if (concerns.any { it.concern == Pjl.Concern.REACHES_SERVER }) {
+            Severity.HIGH
+        } else {
+            Severity.MEDIUM
+        },
+        title = "Printer configuration readable without credentials — $host",
         subject = host,
-        detail = "Read without credentials: " +
-            notable.entries.joinToString("; ") { "${it.key}=${it.value}" } +
-            ". Settings named for passwords, directory or mail servers, job storage and disk " +
-            "encryption are the ones that decide whether this device holds a credential for " +
-            "something else. Where scan-to-folder or scan-to-email is configured, the printer " +
-            "must store an account it can replay, and that account is usually on the file server " +
-            "or the mail system rather than on the printer.",
-        data = mapOf("host" to host) +
-            notable.mapKeys { "pjl_${it.key.lowercase()}" },
+        detail = "Read by a caller presenting nothing: " +
+            concerns.joinToString("; ") { "${it.key}=${it.value} — ${it.meaning}" } + ".",
+        data = mapOf(
+            "host" to host,
+            "concerns" to concerns.joinToString { it.concern.name },
+        ) + concerns.associate { "pjl_${it.key.lowercase()}" to it.value },
     )
 
     private fun storageFinding(host: String, files: List<Pjl.Entry>) = Finding(

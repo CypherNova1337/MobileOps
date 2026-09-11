@@ -139,12 +139,39 @@ class PrinterTest {
 
     /** The point of reading the settings at all: which of them lead somewhere else. */
     @Test
-    fun `settings that name a credential or another server are singled out`() {
-        val notable = Pjl.notableSettings(Pjl.settingsIn(Pjl.parse(pjlReply)))
-        assertTrue(notable.containsKey("PASSWORD"))
-        assertTrue(notable.containsKey("SMTPSERVER"))
-        assertTrue(notable.containsKey("DISKLOCK"))
-        assertFalse("a copy count is not a finding", notable.containsKey("COPIES"))
+    fun `a setting is judged on its value, not on its name`() {
+        val concerns = Pjl.concerns(Pjl.settingsIn(Pjl.parse(pjlReply))).associateBy { it.key }
+        assertEquals(Pjl.Concern.REACHES_SERVER, concerns.getValue("SMTPSERVER").concern)
+        assertEquals(Pjl.Concern.STORAGE_UNPROTECTED, concerns.getValue("DISKLOCK").concern)
+        assertEquals(Pjl.Concern.NO_PJL_PASSWORD, concerns.getValue("PASSWORD").concern)
+        assertFalse("a copy count is not a finding", concerns.containsKey("COPIES"))
+    }
+
+    /**
+     * From a live run against the Lexmark: PASSWORD=DISABLED was reported as HIGH under a
+     * paragraph about stored scan-to-folder credentials the device does not have. The value says
+     * the printer's own password feature is off, which is a different and smaller thing.
+     */
+    @Test
+    fun `a password feature switched off is not read as a stored credential`() {
+        val note = Pjl.concerns(mapOf("PASSWORD" to "DISABLED")).single()
+        assertEquals(Pjl.Concern.NO_PJL_PASSWORD, note.concern)
+        assertTrue(note.meaning.contains("no PJL password"))
+        assertFalse(note.meaning.contains("scan-to-folder"))
+    }
+
+    /** A server key with no server behind it is the feature unconfigured, not a finding. */
+    @Test
+    fun `an unset server setting is not reported`() {
+        assertTrue(Pjl.concerns(mapOf("SMTPSERVER" to "")).isEmpty())
+        assertTrue(Pjl.concerns(mapOf("SMTPSERVER" to "NONE")).isEmpty())
+        assertTrue(Pjl.concerns(mapOf("LDAPSERVER" to "OFF")).isEmpty())
+        assertTrue(Pjl.concerns(mapOf("SMTPSERVER" to "x")).isEmpty())
+    }
+
+    @Test
+    fun `an encrypted disk and a set password produce no concern`() {
+        assertTrue(Pjl.concerns(mapOf("DISKLOCK" to "ON", "PASSWORD" to "12345")).isEmpty())
     }
 
     @Test
