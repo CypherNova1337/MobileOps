@@ -50,4 +50,18 @@ class PathEvidenceTest {
     fun `with no decoys at all a real body still stands`() {
         assertTrue(PathEvidence.isDistinct(2489, emptySet()))
     }
+
+    /**
+     * The second run of the same false positive. The controls came back 435 bytes and the root
+     * 435, so /admin, /cgi-bin/ and /setup.cgi at 2489 each looked distinct — but they were
+     * identical to *each other*, which makes them one page under three names. A body size shared
+     * by several probed paths is a decoy just as much as the control's is.
+     */
+    @Test
+    fun `a size shared by several probed paths is a decoy too`() {
+        val controlsAndRoot = setOf(435)
+        val sharedAcrossPaths = setOf(2489)
+        assertTrue(PathEvidence.isDistinct(2489, controlsAndRoot))
+        assertFalse(PathEvidence.isDistinct(2489, controlsAndRoot + sharedAcrossPaths))
+    }
 }

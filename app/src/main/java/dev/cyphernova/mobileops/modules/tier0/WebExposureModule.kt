@@ -185,14 +185,31 @@ class WebExposureModule : PentestModule {
                 // shell is usually the root.
                 val decoys = (controls + root).map { it.body.length }.toSet()
 
-                SENSITIVE_PATHS.forEach { (path, description) ->
+                // Collected before anything is reported, because the decisive evidence is how
+                // the responses compare with each other. Three paths returning byte-identical
+                // bodies are one page under three names, and that is invisible while each is
+                // judged on its own.
+                val probed = SENSITIVE_PATHS.mapNotNull { (path, description) ->
                     delay(REQUEST_SPACING_MS)
-                    val response = LanHttpClient.probe("$base$path") ?: return@forEach
-                    if (!response.isSuccess || HttpAnalysis.isSoftError(response)) return@forEach
-                    if (response.body.isBlank()) return@forEach
-                    // The same size as a page known not to exist, or as the root, means this is
-                    // that page under another name rather than something this path exposes.
-                    if (!PathEvidence.isDistinct(response.body.length, decoys)) return@forEach
+                    val response = LanHttpClient.probe("$base$path") ?: return@mapNotNull null
+                    if (!response.isSuccess || HttpAnalysis.isSoftError(response)) return@mapNotNull null
+                    if (response.body.isBlank()) return@mapNotNull null
+                    Triple(path, description, response)
+                }
+
+                // Any body size that turns up for more than one path is a shared page rather
+                // than something each of those paths exposes.
+                val shared = probed.groupingBy { it.third.body.length }
+                    .eachCount()
+                    .filterValues { it > 1 }
+                    .keys
+
+                probed.forEach { (path, description, response) ->
+                    // The same size as a page known not to exist, as the root, or as another
+                    // probed path, means this is that page under another name.
+                    if (!PathEvidence.isDistinct(response.body.length, decoys + shared)) return@forEach
+                    // A page asking for credentials is the control working, not a way past it.
+                    if (HttpAnalysis.looksLikeLoginForm(response)) return@forEach
 
                     findings++
                     emit(
@@ -204,7 +221,12 @@ class WebExposureModule : PentestModule {
                             subject = "$base$path",
                             detail = "$description Returned ${response.status} with " +
                                 "${response.body.length} bytes and no authentication." +
-                                if (HttpAnalysis.isDirectoryListing(response)) " Directory listing is enabled." else "",
+                                (if (HttpAnalysis.isDirectoryListing(response)) {
+                                    " Directory listing is enabled."
+                                } else {
+                                    ""
+                                }) +
+                                (HttpAnalysis.pageTitle(response)?.let { " Titled '$it'." } ?: ""),
                             data = mapOf(
                                 "path" to path,
                                 "status" to response.status.toString(),
@@ -213,6 +235,30 @@ class WebExposureModule : PentestModule {
                                 // controls returned rather than taken on trust.
                                 "control_bytes" to controls.joinToString { it.body.length.toString() },
                                 "root_bytes" to root.body.length.toString(),
+                            ),
+                        ),
+                    )
+                }
+
+                if (shared.isNotEmpty()) {
+                    val sharedPaths = probed.filter { it.third.body.length in shared }.map { it.first }
+                    findings++
+                    emit(
+                        Finding(
+                            moduleId = id,
+                            observedAtEpochMs = System.currentTimeMillis(),
+                            severity = Severity.INFO,
+                            title = "One page served for several paths on $base",
+                            subject = base,
+                            detail = "${sharedPaths.joinToString()} all returned bodies of the same " +
+                                "size (${shared.joinToString()} bytes), so this is one page under " +
+                                "several names rather than something each path exposes, and none " +
+                                "of them is reported as a finding. It does differ from what an " +
+                                "invented path returns, so those paths probably do exist — behind " +
+                                "a login, which is the arrangement working rather than failing.",
+                            data = mapOf(
+                                "paths" to sharedPaths.joinToString(),
+                                "bytes" to shared.joinToString(),
                             ),
                         ),
                     )

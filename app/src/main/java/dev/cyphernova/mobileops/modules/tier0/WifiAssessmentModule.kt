@@ -388,9 +388,12 @@ class WifiAssessmentModule : PentestModule {
         val onLocalSubnet = position != null && position.hasLocalSubnet
 
         return when {
-            // A BSSID match is unambiguous; an SSID match is good enough.
-            name != null && (name.bssid.equals(bssid, ignoreCase = true) || name.ssid == ssid) ->
-                LanAccess.CONFIRMED
+            // Same radio, or the other radio of the same access point. A dual-band AP hands its
+            // bands adjacent BSSIDs and names them "X" and "X-5G", and it is one device on one
+            // LAN — so being on the 5 GHz radio of the target is being on the target as far as
+            // an IP-layer route to its management interface is concerned. Reading that as a
+            // different network reported "no route is open" while sitting on the AP's own subnet.
+            name != null && sameAccessPoint(name, ssid, bssid) -> LanAccess.CONFIRMED
 
             // A name came back and it is a different network. That is a real negative.
             name != null && name.readable -> LanAccess.NONE
@@ -399,6 +402,32 @@ class WifiAssessmentModule : PentestModule {
             else -> LanAccess.NONE
         }
     }
+
+    /**
+     * Whether the association named by the platform is the access point under test.
+     *
+     * Matches on the radio itself, on the other radio of the same physical unit, and on the base
+     * network name. Dual-band access points differ only in the last octet of the BSSID and add a
+     * band suffix to the SSID, which is one device however it is labelled.
+     */
+    private fun sameAccessPoint(name: WifiIdentity, ssid: String, bssid: String): Boolean {
+        if (name.bssid.equals(bssid, ignoreCase = true)) return true
+        if (name.ssid == ssid) return true
+        if (devicePrefixOf(name.bssid) != null && devicePrefixOf(name.bssid) == devicePrefixOf(bssid)) {
+            return true
+        }
+        val connected = baseNetworkName(name.ssid)
+        val target = baseNetworkName(ssid)
+        return connected.isNotBlank() && connected == target
+    }
+
+    /** The first five octets, which a dual-band unit shares across its radios. */
+    private fun devicePrefixOf(bssid: String): String? =
+        bssid.split(':').takeIf { it.size == 6 }?.dropLast(1)?.joinToString(":")?.lowercase()
+
+    /** The network name with any band suffix removed, so "VoidSec -5G" and "VoidSec " agree. */
+    private fun baseNetworkName(ssid: String): String =
+        ssid.trim().lowercase().replace(BAND_SUFFIX, "").trim().trimEnd('-', '_')
 
     private data class WifiIdentity(val ssid: String, val bssid: String) {
         /** The platform redacts to a literal placeholder rather than returning nothing. */
@@ -433,6 +462,9 @@ class WifiAssessmentModule : PentestModule {
         const val SCAN_SETTLE_MS = 3_000L
         const val CAPTURE_DIR = "handshakes"
         const val UNKNOWN_SSID = "<unknown ssid>"
+
+        /** The band labels vendors append when one network is served by two radios. */
+        val BAND_SUFFIX = Regex("""[-_ ]?(5\s?g(hz)?|2[.,]?4\s?g(hz)?|6\s?g(hz)?)$""", RegexOption.IGNORE_CASE)
 
         val PSK_ENCRYPTIONS = setOf(
             Encryption.WPA,
