@@ -68,7 +68,9 @@ class EvidenceStore(private val directory: File) {
                 appendLine()
             }
 
-            val distinct = findings.groupBy { Triple(it.moduleId, it.title, it.subject) }.size
+            val distinct = findings
+                .groupBy { listOf(it.moduleId, it.title, it.subject, it.detail) }
+                .size
             appendLine(
                 if (distinct == findings.size) {
                     "## Findings ($distinct)"
@@ -84,7 +86,9 @@ class EvidenceStore(private val directory: File) {
             // Re-running a module re-files everything it sees, so a second pass doubles the
             // report. Identical observations are collapsed into one entry with a count; the log
             // itself stays append-only and complete.
-            findings.groupBy { Triple(it.moduleId, it.title, it.subject) }
+            // Keyed on the detail too. Without it, findings that share a title and subject but
+            // say different things are merged and all but one is dropped from the report.
+            findings.groupBy { listOf(it.moduleId, it.title, it.subject, it.detail) }
                 .values
                 .map { group -> group.maxBy { it.observedAtEpochMs } to group }
                 .sortedWith(

@@ -48,6 +48,13 @@ class ServiceDiscoveryModule : PentestModule {
         val position = LocalNetwork.position(context.androidContext)
             ?: return ModuleOutcome.Failed("No active IPv4 network.")
 
+        if (!position.hasLocalSubnet && context.targets.hosts().isEmpty()) {
+            return ModuleOutcome.Blocked(
+                "This device is on ${position.transport.label} with no local subnet. Multicast " +
+                    "discovery has nowhere to go and there are no neighbours to query.",
+            )
+        }
+
         // Multicast is filtered out by the WiFi stack for power reasons unless a lock is held,
         // so mDNS and SSDP replies would silently never arrive without this.
         val wifi = context.androidContext.applicationContext

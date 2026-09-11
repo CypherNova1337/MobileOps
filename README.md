@@ -162,6 +162,21 @@ never recorded**: bearer tokens, Basic auth, session cookies, `X-Api-Key`-style 
 credentials passed in query strings. An evidence file containing live credentials is its own
 incident.
 
+## Off the network
+
+Not every module needs to be on the network under test, which makes the app useful while
+walking around or on cellular:
+
+| Works anywhere | Needs a local subnet |
+| --- | --- |
+| WiFi survey and beacon elements — scanning does not require associating | Host discovery |
+| Rogue AP correlation | Service & name discovery |
+| Device identity audit | Port scan, TLS audit |
+| Traffic capture and TLS interception — these work fine over cellular | Web exposure, credentials, WPS registrar |
+
+A carrier link hands out a /32, which is point-to-point: no neighbours, nothing to sweep. The LAN
+modules detect that and say so rather than reporting a subnet that does not exist.
+
 ## Targets
 
 Modules that act on a host take their targets from the Targets tab: pick a WiFi network from a

@@ -56,15 +56,18 @@ class IdentityAuditModule : PentestModule {
             ),
         )
 
-        surface.notes.forEach { note ->
+        // One finding carrying every note, rather than a finding per note: they are all the same
+        // observation about the same device, and as separate entries they drowned the report.
+        if (surface.notes.isNotEmpty()) {
             emit(
                 Finding(
                     moduleId = id,
                     observedAtEpochMs = System.currentTimeMillis(),
                     severity = Severity.INFO,
-                    title = "Identity note",
+                    title = "What the platform will and will not expose",
                     subject = surface.deviceName ?: "this device",
-                    detail = note,
+                    detail = surface.notes.joinToString("\n\n") { "• $it" },
+                    data = mapOf("note_count" to surface.notes.size.toString()),
                 ),
             )
         }

@@ -37,6 +37,15 @@ class HostDiscoveryModule : PentestModule {
         val position = LocalNetwork.position(context.androidContext)
             ?: return ModuleOutcome.Failed("No active IPv4 network.")
 
+        if (!position.hasLocalSubnet) {
+            return ModuleOutcome.Blocked(
+                "This device is on ${position.transport.label} with a /${position.prefixLength} " +
+                    "address, which is a point-to-point link: there are no neighbours to find. " +
+                    "LAN modules need WiFi or Ethernet. WiFi survey, traffic capture and TLS " +
+                    "interception all still work here.",
+            )
+        }
+
         // A /16 sweep is 65k probes: minutes of radio time and a flat battery, not a useful scan.
         if (position.prefixLength < MIN_PREFIX) {
             return ModuleOutcome.Blocked(
