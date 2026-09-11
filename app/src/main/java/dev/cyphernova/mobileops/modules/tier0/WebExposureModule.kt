@@ -85,7 +85,10 @@ class WebExposureModule : PentestModule {
                     )
                 }
 
-                if (root.isSuccess && !HttpAnalysis.looksLikeLoginForm(root)) {
+                // Every signal the response carries, not just the absence of a password field.
+                // A page titled "401 Unauthorized" served with a 200 is the device refusing, and
+                // calling that unauthenticated access is a finding that is not there.
+                if (root.isSuccess && !HttpAnalysis.deniesAccess(root)) {
                     findings++
                     emit(
                         Finding(
@@ -94,8 +97,11 @@ class WebExposureModule : PentestModule {
                             severity = Severity.MEDIUM,
                             title = "Web root served without authentication",
                             subject = base,
-                            detail = "The root page returns ${root.status} with no login prompt or " +
-                                "form. Whatever it exposes is reachable by anyone on this network.",
+                            detail = "The root page returns ${root.status} with no login form, no " +
+                                "authentication challenge, and nothing in its title or body that " +
+                                "says it is refusing. Whatever it exposes is reachable by anyone " +
+                                "on this network." +
+                                (HttpAnalysis.pageTitle(root)?.let { " Titled '$it'." } ?: ""),
                         ),
                     )
                 }
@@ -208,8 +214,11 @@ class WebExposureModule : PentestModule {
                     // The same size as a page known not to exist, as the root, or as another
                     // probed path, means this is that page under another name.
                     if (!PathEvidence.isDistinct(response.body.length, decoys + shared)) return@forEach
-                    // A page asking for credentials is the control working, not a way past it.
-                    if (HttpAnalysis.looksLikeLoginForm(response)) return@forEach
+                    // A page that refuses — by challenge, by login form, by a denial in the
+                    // body, or by a title that says so — is the control working, not a way past
+                    // it. The title is the one that caught a router serving "401 Unauthorized"
+                    // with a 200 and being reported as an exposed setup endpoint.
+                    if (HttpAnalysis.deniesAccess(response)) return@forEach
 
                     findings++
                     emit(

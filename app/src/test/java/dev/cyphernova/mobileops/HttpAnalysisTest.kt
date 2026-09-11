@@ -161,6 +161,52 @@ class HttpAnalysisTest {
         val header = HttpAnalysis.basicAuthHeader("admin", "")
         assertEquals("admin:", String(Base64.getDecoder().decode(header.removePrefix("Basic "))))
     }
+
+    // ---- Does the page actually let you in? ----------------------------------------------------
+
+    /**
+     * From a live run against a Netgear RAX42. The module reported `/setup.cgi` as "reachable ...
+     * and no authentication" in the same sentence as "Titled '401 Unauthorized'" — it extracted
+     * the evidence, printed it, and did not consult it. A denial served with a 200 is still a
+     * denial.
+     */
+    @Test
+    fun `a page titled 401 Unauthorized is a refusal, whatever status it carries`() {
+        val denial = response(
+            status = 200,
+            body = "<html><head><title>401 Unauthorized</title></head><body></body></html>",
+        )
+        assertTrue(HttpAnalysis.deniesAccess(denial))
+    }
+
+    @Test
+    fun `every way a device says no is recognised`() {
+        listOf(
+            response(status = 200, body = "<title>403 Forbidden</title>"),
+            response(status = 200, body = "<title>Login</title>"),
+            response(status = 200, body = "<title>Sign in to continue</title>"),
+            response(status = 200, body = "<html>Access denied</html>"),
+            response(status = 200, body = "<input type=\"password\" name=\"pw\">"),
+            response(
+                status = 401,
+                headers = mapOf("www-authenticate" to "Basic realm=\"NETGEAR RAX42\""),
+            ),
+        ).forEach { assertTrue(it.body.take(40), HttpAnalysis.deniesAccess(it)) }
+    }
+
+    /**
+     * The other half. Suppressing real exposure is as bad as inventing it, so a page that is
+     * genuinely open must not be mistaken for a refusal.
+     */
+    @Test
+    fun `a page that is genuinely open is not mistaken for a refusal`() {
+        listOf(
+            response(status = 200, body = "<title>Printer Status</title><p>Ready</p>"),
+            response(status = 200, body = "<title>Index of /backup</title>"),
+            response(status = 200, body = "<h1>Device configuration</h1><p>Uptime 4 days</p>"),
+            response(status = 200, body = ""),
+        ).forEach { assertFalse(it.body.take(40), HttpAnalysis.deniesAccess(it)) }
+    }
 }
 
 class DefaultCredentialsTest {
