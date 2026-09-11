@@ -22,6 +22,11 @@ object DeviceEvidence {
     private val NAME_FIELDS = listOf(
         "hostname", "name", "server", "services", "service_types", "device_name",
         "manufacturer", "model", "vendor", "workgroup",
+        // An HTTP Basic realm is the most reliable name a LAN appliance gives out: a device
+        // answering 'NETGEAR RAX42' has told you exactly what it is. Without this the host at
+        // 192.168.100.1 in a live run was reported as a workstation while the web module was
+        // reading 'Netgear' off its own login prompt.
+        "realm",
     )
 
     private val BANNER_FIELDS = listOf("banner", "banners")
@@ -65,11 +70,22 @@ object DeviceEvidence {
 
     /** Whether a finding is about this host, by subject or by any address field it carries. */
     private fun mentions(finding: Finding, address: String): Boolean {
-        if (finding.subject.trim() == address) return true
-        if (finding.subject.startsWith("$address:")) return true
+        val subject = finding.subject.trim()
+        if (subject == address) return true
+        if (subject.startsWith("$address:")) return true
+        // The web modules name their subject as a URL, so the realm they read off a login prompt
+        // never reached the host it belongs to.
+        if (subject.contains("://") && hostOf(subject) == address) return true
         return ADDRESS_FIELDS.any { field ->
             finding.data[field].orEmpty().split(',').any { it.trim() == address }
         }
+    }
+
+    /** The host part of a `scheme://host:port/path` subject. */
+    private fun hostOf(url: String): String {
+        val authority = url.substringAfter("://", "").substringBefore('/').substringAfterLast('@')
+        if (authority.startsWith("[")) return authority.substringAfter('[').substringBefore(']')
+        return authority.substringBeforeLast(':')
     }
 
     /**

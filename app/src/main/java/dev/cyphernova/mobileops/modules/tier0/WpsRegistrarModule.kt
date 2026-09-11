@@ -60,24 +60,33 @@ class WpsRegistrarModule : PentestModule {
         var recovered = 0
 
         hosts.forEach { host ->
+            val advertised = UpnpLocations.advertisedRegistrar(context.priorFindings, host) != null
             val search = findDescription(context, host)
             if (!search.found) {
-                // Reported rather than skipped. "No description found" with no record of what was
-                // asked for is indistinguishable from the module not having run.
-                emit(
-                    note(
-                        host,
-                        "No UPnP description answered on $host",
-                        host,
-                        "Tried ${search.attempted.size} URL(s) and none returned a device " +
-                            "description: ${search.attempted.joinToString()}. Where service " +
-                            "discovery has already advertised a location for this host it is " +
-                            "tried first, so this means the service is genuinely not answering " +
-                            "rather than that the port was guessed wrongly. Run service discovery " +
-                            "first if it has not been run in this session.",
-                        data = mapOf("attempted" to search.attempted.joinToString()),
-                    ),
-                )
+                // A host that never advertised a registrar is not a WPS target, and saying so
+                // once per address turns a segment sweep into a page of identical notes. Only
+                // the hosts that did advertise one are worth a finding when they then fail.
+                if (advertised) {
+                    emit(
+                        note(
+                            host,
+                            "WPS registrar advertised but its description did not answer — $host",
+                            host,
+                            "Service discovery recorded a WPS External Registrar on this host, " +
+                                "so the description should be there. It was asked for and it did " +
+                                "not arrive. What each attempt actually did: " +
+                                search.attempted.joinToString("; ") { it.describe() } + ". " +
+                                "A refused connection means the daemon is not listening on the " +
+                                "port it advertised; a timeout means it is listening and not " +
+                                "replying; an HTTP status means it replied with something that " +
+                                "was not a device description.",
+                            data = mapOf(
+                                "attempted" to search.attempted.joinToString { it.describe() },
+                                "advertised_registrar" to "true",
+                            ),
+                        ),
+                    )
+                }
                 return@forEach
             }
             probed++
@@ -501,7 +510,7 @@ class WpsRegistrarModule : PentestModule {
     private data class DescriptionSearch(
         val url: String?,
         val body: String?,
-        val attempted: List<String>,
+        val attempted: List<LanHttpClient.Attempt>,
     ) {
         val found: Boolean get() = url != null && body != null
     }
@@ -516,13 +525,16 @@ class WpsRegistrarModule : PentestModule {
         context: ModuleContext,
         host: String,
     ): DescriptionSearch {
-        val attempted = mutableListOf<String>()
+        val attempted = mutableListOf<LanHttpClient.Attempt>()
         val guesses = DESCRIPTION_CANDIDATES.map { (port, path) -> "http://$host:$port$path" }
 
         UpnpLocations.candidatesFor(context.priorFindings, host, guesses).forEach { url ->
-            attempted += url
-            val response = LanHttpClient.probe(url, timeoutMs = DESCRIPTION_TIMEOUT_MS)
-                ?: return@forEach
+            // Every outcome is recorded, not just the successes. A refused port, a timeout and a
+            // page that arrived without a service list are three different problems, and a
+            // report that collapses them into "nothing answered" cannot tell them apart.
+            val attempt = LanHttpClient.attempt(url, timeoutMs = DESCRIPTION_TIMEOUT_MS)
+            attempted += attempt
+            val response = (attempt as? LanHttpClient.Attempt.Answered)?.response ?: return@forEach
             if (response.isSuccess && response.body.contains("<serviceType>", ignoreCase = true)) {
                 return DescriptionSearch(url, response.body, attempted)
             }

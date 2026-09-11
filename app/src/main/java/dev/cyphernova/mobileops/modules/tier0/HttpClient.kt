@@ -22,6 +22,66 @@ import javax.net.ssl.X509TrustManager
  */
 object LanHttpClient {
 
+    /**
+     * What happened to one request, including the cases [probe] reports as null.
+     *
+     * A probe that only says "nothing came back" cannot distinguish a refused connection from a
+     * timeout from a page that arrived and did not contain what was being looked for — and those
+     * are three different findings. Carrying the reason means the next report diagnoses the
+     * problem instead of inviting another round of guessing.
+     */
+    sealed interface Attempt {
+        val url: String
+
+        data class Answered(override val url: String, val response: HttpResponse) : Attempt
+        data class Refused(override val url: String) : Attempt
+        data class TimedOut(override val url: String) : Attempt
+        data class Unreachable(override val url: String, val reason: String) : Attempt
+        data class Failed(override val url: String, val reason: String) : Attempt
+
+        /** A short phrase for a report line: `http://host:port/path — connection refused`. */
+        fun describe(): String = when (this) {
+            is Answered -> "$url — HTTP ${response.status}, ${response.body.length} bytes"
+            is Refused -> "$url — connection refused"
+            is TimedOut -> "$url — timed out"
+            is Unreachable -> "$url — unreachable ($reason)"
+            is Failed -> "$url — $reason"
+        }
+    }
+
+    /** [probe], but saying why when nothing usable came back. */
+    suspend fun attempt(
+        url: String,
+        method: String = "GET",
+        authorization: String? = null,
+        followRedirects: Boolean = false,
+        timeoutMs: Int = 5_000,
+        body: ByteArray? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): Attempt = withContext(Dispatchers.IO) {
+        try {
+            val response = probeOrThrow(url, method, authorization, followRedirects, timeoutMs, body, headers)
+            Attempt.Answered(url, response)
+        } catch (failure: java.net.SocketTimeoutException) {
+            Attempt.TimedOut(url)
+        } catch (failure: java.net.ConnectException) {
+            // "Connection refused" and "no route to host" both arrive here; the message separates
+            // a port that is closed from a host that is not there at all.
+            val message = failure.message.orEmpty()
+            if (message.contains("refused", ignoreCase = true)) {
+                Attempt.Refused(url)
+            } else {
+                Attempt.Unreachable(url, message.ifBlank { "connect failed" })
+            }
+        } catch (failure: java.net.NoRouteToHostException) {
+            Attempt.Unreachable(url, "no route to host")
+        } catch (failure: java.net.UnknownHostException) {
+            Attempt.Unreachable(url, "unknown host")
+        } catch (failure: java.io.IOException) {
+            Attempt.Failed(url, failure.message ?: failure.javaClass.simpleName)
+        }
+    }
+
     suspend fun probe(
         url: String,
         method: String = "GET",
@@ -31,8 +91,23 @@ object LanHttpClient {
         body: ByteArray? = null,
         headers: Map<String, String> = emptyMap(),
     ): HttpResponse? = withContext(Dispatchers.IO) {
-        val started = System.currentTimeMillis()
         runCatching {
+            probeOrThrow(url, method, authorization, followRedirects, timeoutMs, body, headers)
+        }.getOrNull()
+    }
+
+    /** The one implementation. [probe] swallows the failure; [attempt] reports it. */
+    private fun probeOrThrow(
+        url: String,
+        method: String,
+        authorization: String?,
+        followRedirects: Boolean,
+        timeoutMs: Int,
+        body: ByteArray?,
+        headers: Map<String, String>,
+    ): HttpResponse {
+        val started = System.currentTimeMillis()
+        run {
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = method
                 connectTimeout = timeoutMs
@@ -78,8 +153,8 @@ object LanHttpClient {
             }.orEmpty()
 
             connection.disconnect()
-            HttpResponse(status, responseHeaders, responseBody, System.currentTimeMillis() - started)
-        }.getOrNull()
+            return HttpResponse(status, responseHeaders, responseBody, System.currentTimeMillis() - started)
+        }
     }
 
     /**

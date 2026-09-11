@@ -148,6 +148,38 @@ class DeviceEvidenceTest {
         assertTrue(verdict.significance.contains("printer", ignoreCase = true))
     }
 
+    /**
+     * From a live run: the web module read 'Netgear' off the login prompt at 192.168.100.1 and
+     * the classifier still called it a workstation, because the web finding's subject is a URL
+     * and nothing matched it back to the host.
+     */
+    @Test
+    fun `a realm read from a url subject reaches the host it belongs to`() {
+        val findings = listOf(
+            finding(subject = "192.168.100.1", data = mapOf("open_ports" to "80, 443, 8080")),
+            finding(
+                moduleId = "t0.exploit.webexposure",
+                subject = "https://192.168.100.1:443",
+                data = mapOf("status" to "401", "realm" to "NETGEAR RAX42"),
+            ),
+        )
+        val evidence = DeviceEvidence.forHost(findings, "192.168.100.1")
+        assertTrue(evidence.names.contains("NETGEAR RAX42"))
+        assertEquals(Category.NETWORK_DEVICE, DeviceFingerprint.classify(evidence).category)
+    }
+
+    @Test
+    fun `a url subject for a different host is not pooled in`() {
+        val findings = listOf(
+            finding(
+                moduleId = "t0.exploit.webexposure",
+                subject = "https://192.168.100.1:443",
+                data = mapOf("realm" to "NETGEAR RAX42"),
+            ),
+        )
+        assertTrue(DeviceEvidence.forHost(findings, "192.168.61.6").names.isEmpty())
+    }
+
     @Test
     fun `an empty log yields empty evidence rather than throwing`() {
         val evidence = DeviceEvidence.forHost(emptyList(), "192.168.61.6")

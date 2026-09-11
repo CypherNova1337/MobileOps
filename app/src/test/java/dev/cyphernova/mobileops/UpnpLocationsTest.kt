@@ -5,6 +5,7 @@ import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.exploit.UpnpLocations
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -148,6 +149,55 @@ class UpnpLocationsTest {
             ),
         )
         assertFalse(UpnpLocations.advertisedFor(findings, "fe80::1").isEmpty())
+    }
+
+    /**
+     * From a live run: the registrar chased all eleven hosts on the segment plus three addresses
+     * beyond it, and filed an identical "nothing answered" note about each one. Only the host
+     * that actually advertised a registrar is a WPS target.
+     */
+    @Test
+    fun `a host that advertised a registrar is distinguished from one that did not`() {
+        val findings = listOf(
+            finding(
+                subject = "192.168.61.1",
+                data = mapOf(
+                    "wps_location" to "http://192.168.61.1:49152/wps_device.xml",
+                    "service_types" to "urn:schemas-wifialliance-org:service:WFAWLANConfig:1",
+                ),
+            ),
+            finding(
+                subject = "192.168.61.12",
+                data = mapOf(
+                    "location" to "http://192.168.61.12:1677/",
+                    "service_types" to "urn:schemas-upnp-org:device:MediaRenderer:1",
+                ),
+            ),
+        )
+        assertEquals(
+            "http://192.168.61.1:49152/wps_device.xml",
+            UpnpLocations.advertisedRegistrar(findings, "192.168.61.1"),
+        )
+        assertNull(UpnpLocations.advertisedRegistrar(findings, "192.168.61.12"))
+        assertNull(UpnpLocations.advertisedRegistrar(findings, "192.168.61.9"))
+    }
+
+    /** A registrar named only by service type still counts, without a wps_location field. */
+    @Test
+    fun `a registrar named by service type alone is recognised`() {
+        val findings = listOf(
+            finding(
+                subject = "192.168.61.1",
+                data = mapOf(
+                    "location" to "http://192.168.61.1:49152/wps_device.xml",
+                    "service_types" to "urn:schemas-wifialliance-org:service:WFAWLANConfig:1",
+                ),
+            ),
+        )
+        assertEquals(
+            "http://192.168.61.1:49152/wps_device.xml",
+            UpnpLocations.advertisedRegistrar(findings, "192.168.61.1"),
+        )
     }
 
     @Test
