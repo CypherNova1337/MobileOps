@@ -10,9 +10,9 @@ import dev.cyphernova.mobileops.modules.tier0.NetworkJoinModule
 import dev.cyphernova.mobileops.modules.tier0.IdentityAuditModule
 import dev.cyphernova.mobileops.modules.tier0.PortScanModule
 import dev.cyphernova.mobileops.modules.tier0.RogueApModule
-import dev.cyphernova.mobileops.modules.tier0.RttRangingModule
 import dev.cyphernova.mobileops.modules.tier0.SsidIntelModule
 import dev.cyphernova.mobileops.modules.tier0.WardriveModule
+import dev.cyphernova.mobileops.modules.tier0.WifiAssessmentModule
 import dev.cyphernova.mobileops.modules.tier0.SiteSurveyModule
 import dev.cyphernova.mobileops.modules.tier0.ServiceDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.TlsAuditModule
@@ -32,6 +32,9 @@ import dev.cyphernova.mobileops.modules.tier2.MonitorModeModule
 object ModuleRegistry {
 
     val all: List<PentestModule> = listOf(
+        // The assessment leads: it is the module an engagement actually runs, and the rest
+        // of the wireless set is what it draws on.
+        WifiAssessmentModule(),
         SiteSurveyModule(),
         WifiSurveyModule(),
         SsidIntelModule(),
@@ -41,7 +44,6 @@ object ModuleRegistry {
         BleReconModule(),
         BluetoothClassicModule(),
         CellularSurveyModule(),
-        RttRangingModule(),
         HostDiscoveryModule(),
         ServiceDiscoveryModule(),
         PortScanModule(),

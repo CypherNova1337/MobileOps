@@ -4,7 +4,6 @@ import android.Manifest
 import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
-import dev.cyphernova.mobileops.core.exploit.WpsPin
 import dev.cyphernova.mobileops.core.module.Intrusiveness
 import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
@@ -156,8 +155,6 @@ class WifiSurveyModule : PentestModule {
                 )
             }
 
-            if (profile.wpsEnabled) emit(pinCandidates(ap, beacon?.wps?.setupLocked, facts))
-
             (profile.issues + beaconIssues).forEach { issue ->
                 flagged++
                 emit(
@@ -181,61 +178,6 @@ class WifiSurveyModule : PentestModule {
                 "${observations.size} selected AP(s) audited of ${visible.size} in range, " +
                     "$flagged weakness(es) flagged."
             },
-        )
-    }
-
-    /**
-     * Computes the default PINs this AP is likely to be using, from its BSSID.
-     *
-     * A long line of consumer firmware generated the WPS PIN on the sticker from the MAC address
-     * with a published function, which means the "secret" is derivable by anyone who can hear the
-     * beacon. Working the candidates out here, off-network, is what lets the registrar attack run
-     * as a handful of attempts instead of eleven thousand once there is a route to the device.
-     *
-     * A radio-side PIN lock does not close this: the UPnP registrar path ignores it entirely.
-     */
-    private fun pinCandidates(
-        ap: ApObservation,
-        setupLocked: Boolean?,
-        facts: Map<String, String>,
-    ): Finding {
-        val candidates = WpsPin.candidatesFor(ap.bssid)
-        val derived = candidates.filter { it.algorithm != "known default" }
-
-        return Finding(
-            moduleId = id,
-            observedAtEpochMs = System.currentTimeMillis(),
-            severity = Severity.HIGH,
-            title = "WPS default PIN candidates — ${ap.displaySsid}",
-            subject = ap.bssid,
-            detail = buildString {
-                append(
-                    "The PIN on this AP's sticker is derivable from its BSSID on any firmware " +
-                        "that used a published default-PIN function, which most consumer routers " +
-                        "of the WPS era did. ${derived.size} candidate(s) computed from " +
-                        "${ap.bssid}, plus ${candidates.size - derived.size} fixed defaults: ",
-                )
-                append(candidates.take(6).joinToString { "${it.pin} (${it.algorithm})" })
-                append(". ")
-                when (setupLocked) {
-                    true -> append(
-                        "The beacon says AP Setup Locked, so PIN attempts over the air are " +
-                            "refused — but that lock lives in the radio path and does not apply " +
-                            "to the registrar exposed over UPnP. ",
-                    )
-                    false -> append("The AP is not advertising a setup lock, so PIN attempts are accepted. ")
-                    null -> Unit
-                }
-                append(
-                    "Run the WPS registrar attack once there is a route to this device to test " +
-                        "them; it will try these first.",
-                )
-            },
-            data = facts + mapOf(
-                "pin_candidates" to candidates.take(12).joinToString { it.pin },
-                "pin_algorithms" to derived.joinToString { "${it.algorithm}=${it.pin}" },
-                "wps_setup_locked" to setupLocked?.toString().orEmpty(),
-            ),
         )
     }
 

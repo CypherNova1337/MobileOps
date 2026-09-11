@@ -176,7 +176,6 @@ walking around or on cellular:
 | **BLE reconnaissance** — every advertising device in range, named and attributed | WPS registrar attack |
 | **Classic Bluetooth discovery** — discoverable devices and what they are | |
 | **Cellular survey** — operators, generations, serving-cell baseline, 2G exposure | |
-| **802.11mc ranging** — true distance in metres to APs that support it | |
 | WiFi survey and beacon elements — scanning does not require associating | |
 | Rogue AP correlation | |
 | Device identity audit | |
@@ -249,6 +248,11 @@ scattered among usable ones.
 
 
 **Tier 0 — passive**
+- `t0.wifi.assess` — **the module an engagement runs.** Takes the selected network, gathers
+  everything passively observable about it, and reports how it would be entered: every route
+  ranked by how close it is to working, each with what it needs and what is blocking it. Scoped
+  to a selected target, because a survey that generates attack material for every AP in earshot
+  produces a report about other people's networks.
 - `t0.wifi.sitesurvey` — repeated sweep of the whole RF environment: every AP in range, vendors,
   channel congestion, security census. Needs no network of any kind.
 - `t0.wifi.ssidintel` — reads every network name in range for what it gives away: unchanged
@@ -281,9 +285,6 @@ scattered among usable ones.
   of Device into what each one is and which services it carries. Finds the laptops, printers and
   car kits BLE scanning cannot see. A device answering here has been left discoverable, which is
   the finding.
-- `t0.wifi.rtt` — measures true distance in metres to APs supporting 802.11mc fine timing
-  measurement. No association involved; two readings from different positions locate a rogue AP
-  physically, which RSSI cannot do.
 - `t0.net.services` — resolves names and services over NetBIOS, mDNS and SSDP: the announcements
   devices already make. Fills in the names reverse DNS cannot.
 - `t0.net.discovery` — subnet sweep via ICMP echo plus TCP connect probes. Caps at a /22, because
@@ -341,6 +342,42 @@ exploit modules are scoped to what proves a finding and stops:
   leaves it exactly as it was found.
 
 These stop at demonstration. None pivots, persists, or modifies the target.
+
+## Attack paths
+
+A list of weaknesses is not a WiFi assessment. "WPS is enabled" and "802.11w is optional" are
+true statements that do not tell an operator whether they are getting onto the network this
+afternoon or not at all. What decides that is which routes are open, what each one needs that
+the operator may not have, and which is cheapest.
+
+`t0.wifi.assess` answers that for one selected network. Every route it knows about is reported
+with a viability:
+
+| Viability | Meaning |
+| --- | --- |
+| **Open now** | Usable from this handset with what is already known. |
+| **Needs LAN access first** | Usable once the phone has an IP on the network — a pivot, not an entry. |
+| **Needs a capture** | Usable once a handshake or PMKID is supplied from hardware that can collect one. |
+| **Blocked on this device** | Not reachable from a stock handset, with the reason and the hardware that would change it. |
+| **Not applicable** | The target's own configuration closes it. |
+
+Blocked routes are reported rather than hidden. Most published WiFi attacks need monitor mode or
+injection, and a tool that lists those as available is lying to its operator — whereas saying
+*why* they are blocked tells them exactly what hardware changes the answer.
+
+Two judgements in there are worth stating outright, because getting either wrong sends an
+operator after something that cannot work:
+
+- **SAE-only defeats offline recovery.** WPA3's handshake is a password-authenticated key
+  exchange, so a captured exchange cannot be tested against a wordlist. This is the specific
+  thing SAE was designed to stop. **Transition mode is different** — it still accepts PSK, so
+  it remains a passphrase target, and that is the whole point of flagging transition mode.
+- **802.11w decides whether a capture can be forced.** Where PMF is required, deauthentication
+  does not work even with capable hardware, so a handshake has to be waited for rather than
+  provoked.
+
+The verdict never says a network is secure. Absence of a route from this handset is a statement
+about the handset.
 
 ### Getting onto a network you do not have the key for
 
