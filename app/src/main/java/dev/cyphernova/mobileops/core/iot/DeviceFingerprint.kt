@@ -59,6 +59,12 @@ object DeviceFingerprint {
         val macVendor: String? = null,
         /** Service strings from mDNS or SSDP, e.g. `_ipp._tcp` or a UPnP device type. */
         val advertisedServices: List<String> = emptyList(),
+        /**
+         * Whether this host routes for the segment. Not an inference drawn from a name or a port
+         * list — the run read it off the interface, so it is the one thing about a device that is
+         * known outright.
+         */
+        val isGateway: Boolean = false,
     ) {
         val searchableText: String
             get() = (names + advertisedServices + banners.values + listOfNotNull(macVendor))
@@ -81,6 +87,22 @@ object DeviceFingerprint {
         // answering on its registered port is a fact about what it runs.
         val byPort = portVerdict(evidence)
         val byName = nameVerdict(evidence)
+
+        // Routing for the segment settles the question. A gateway that happens to run a print
+        // server or a media server is still the gateway, and its configuration is what every
+        // other finding on the segment is measured against.
+        if (evidence.isGateway) {
+            return Verdict(
+                category = Category.NETWORK_DEVICE,
+                confidence = Confidence.CONFIRMED,
+                basis = "it routes for this segment",
+                significance = "Network infrastructure. Its configuration defines the " +
+                    "segmentation everything else depends on, and on a consumer unit its " +
+                    "administrative interface also holds the passphrase of every SSID it serves." +
+                    byPort?.let { " Also answering as ${it.category.label.lowercase()}." }.orEmpty(),
+                fragility = IotPorts.fragilityAcross(evidence.openPorts),
+            )
+        }
 
         if (byPort != null) {
             // Where both agree, the name usually says the more useful half. A printer found on

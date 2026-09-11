@@ -59,9 +59,7 @@ object DeviceEvidence {
             banners = banners,
             names = names,
             advertisedServices = mine.mapNotNull { it.data["service_types"]?.takeIf { s -> s.isNotBlank() } },
-            // Recorded as a name so the classifier's existing reasoning picks it up rather than
-            // needing a parallel path: "gateway" matches its network-infrastructure signal.
-            macVendor = if (gateway != null && gateway == address) "gateway router" else null,
+            isGateway = gateway != null && gateway == address,
         )
     }
 

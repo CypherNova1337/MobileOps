@@ -116,8 +116,36 @@ class DeviceEvidenceTest {
         val findings = listOf(
             finding(subject = "10.0.0.5", data = mapOf("open_ports" to "502", "hostname" to "office-tv")),
         )
-        val evidence = DeviceEvidence.forHost(findings, "10.0.0.5", gateway = "10.0.0.5")
+        val evidence = DeviceEvidence.forHost(findings, "10.0.0.5")
         assertEquals(Category.INDUSTRIAL_CONTROL, DeviceFingerprint.classify(evidence).category)
+    }
+
+    /**
+     * Routing for the segment is read off the interface, not guessed at from a product name, so
+     * it should not be reported at the same confidence as a name that merely looked router-ish.
+     */
+    @Test
+    fun `the gateway is confirmed infrastructure rather than inferred`() {
+        val findings = listOf(
+            finding(subject = "192.168.61.1", data = mapOf("open_ports" to "53, 80, 443")),
+        )
+        val evidence = DeviceEvidence.forHost(findings, "192.168.61.1", gateway = "192.168.61.1")
+        val verdict = DeviceFingerprint.classify(evidence)
+        assertEquals(Category.NETWORK_DEVICE, verdict.category)
+        assertEquals(DeviceFingerprint.Confidence.CONFIRMED, verdict.confidence)
+        assertTrue(verdict.basis.contains("routes for this segment"))
+    }
+
+    /** A gateway that also runs equipment says so, rather than hiding what else answered. */
+    @Test
+    fun `a gateway running another service still names that service`() {
+        val findings = listOf(
+            finding(subject = "192.168.61.1", data = mapOf("open_ports" to "80, 9100")),
+        )
+        val evidence = DeviceEvidence.forHost(findings, "192.168.61.1", gateway = "192.168.61.1")
+        val verdict = DeviceFingerprint.classify(evidence)
+        assertEquals(Category.NETWORK_DEVICE, verdict.category)
+        assertTrue(verdict.significance.contains("printer", ignoreCase = true))
     }
 
     @Test
