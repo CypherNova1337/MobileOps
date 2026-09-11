@@ -291,6 +291,9 @@ scattered among usable ones.
   a /16 sweep is 65k probes and a flat battery.
 - `t0.net.portscan` — connect-scans a well-known port set on the selected hosts, with banner
   grabbing. A full handshake lands in the target's logs; SYN scanning needs Tier 1.
+- `t0.net.segmentation` — tests whether this segment is actually isolated: peer reachability,
+  gateway management exposure, what the resolver will disclose about other segments, and whether
+  other address plans answer at all. Usually the finding that decides a report.
 - `t0.iot.discovery` — identifies **equipment** rather than ports: DICOM, HL7, BACnet, Modbus,
   MQTT, CoAP, RTSP, Niagara Fox, EtherNet/IP and the rest a top-1000 list misses. Speaks each
   protocol well enough to make the device identify itself, then says what it is and why it
@@ -318,6 +321,55 @@ scattered among usable ones.
 **Tier 2**
 - `t2.radio.monitor` — verifies a radio really enters monitor mode and enumerates the channels
   the driver reports.
+
+## Segmentation
+
+A guest network with a weak passphrase is a footnote if it is genuinely isolated and the whole
+engagement if it is not. The same holds for any segment carrying equipment: the protocols that
+equipment speaks have no authentication of their own, so the network separating them *is* the
+control, and whether it holds is the question worth answering.
+
+`t0.net.segmentation` tests five things from wherever the device is attached:
+
+| Test | What a failure means |
+| --- | --- |
+| **Peer isolation** | Other clients on this segment answer directly. On a visitor network every guest is exposed to every other one. |
+| **Gateway management** | The router's admin interface is reachable. A client segment needs to be *routed by* the gateway, not to administer it — and a default password there gives up every SSID it serves. |
+| **Resolver posture** | An internal resolver was handed out to a segment that should not be able to enumerate the estate. |
+| **Name disclosure** | That resolver answers reverse lookups for other segments, or publishes the directory SRV records that name the domain controllers. |
+| **Cross-segment reach** | Conventional infrastructure addresses in other address plans answer. Traffic is being routed somewhere it has no reason to go and nothing dropped it. |
+
+The candidate addresses are built from convention rather than a sweep — a phone cannot scan
+RFC1918, and it does not need to, because the answer is almost always sitting on one of a handful
+of predictable addresses. Reaching something is the finding; nothing tries to do anything with
+what it reaches.
+
+## Enterprise WiFi (802.1X)
+
+Enterprise WiFi has no shared passphrase, so everything the PSK analysis does is irrelevant to it
+— and a tool that stops there concludes an enterprise network is fine, which is close to
+backwards. The exposure moved rather than disappearing: it now sits in the client's supplicant
+configuration and in what the RADIUS exchange gives away.
+
+What a beacon does settle, and `t0.wifi.assess` now reports:
+
+- **The same SSID also served with a pre-shared key.** The finding worth walking a building for.
+  A client configured for the enterprise profile associates to whichever BSSID answers, so the
+  whole deployment is only as strong as that passphrase — which can be cracked offline. Everything
+  the RADIUS infrastructure does is bypassed by standing where the weaker radio is loudest.
+- **Management frame protection.** It matters more here than on a personal network: forcing a
+  reassociation produces a fresh EAP exchange, and on PEAP or TTLS that carries the outer identity
+  in the clear plus an MSCHAPv2 challenge-response that can be attacked offline.
+- **Suite B**, which mandates certificate-based EAP and PMF, and so closes the relay path by
+  construction.
+
+The finding that matters most is stated as something to verify rather than as a result, because
+it genuinely cannot be observed from outside: **whether clients validate the RADIUS server's
+certificate.** Where they do not, a rogue AP with the same SSID collects a credential. This
+handset cannot test that — standing up a convincing clone needs a SoftAP with a chosen SSID and a
+RADIUS server behind it, and the platform gives an app no control over the hotspot SSID — so the
+route is reported as blocked, with what it would take (`hostapd-wpe`, `eaphammer`) rather than
+omitted.
 
 ## IoT and OT
 

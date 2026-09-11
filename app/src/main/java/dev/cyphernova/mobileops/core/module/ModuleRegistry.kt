@@ -15,6 +15,7 @@ import dev.cyphernova.mobileops.modules.tier0.SsidIntelModule
 import dev.cyphernova.mobileops.modules.tier0.WardriveModule
 import dev.cyphernova.mobileops.modules.tier0.WifiAssessmentModule
 import dev.cyphernova.mobileops.modules.tier0.SiteSurveyModule
+import dev.cyphernova.mobileops.modules.tier0.SegmentationModule
 import dev.cyphernova.mobileops.modules.tier0.ServiceDiscoveryModule
 import dev.cyphernova.mobileops.modules.tier0.TlsAuditModule
 import dev.cyphernova.mobileops.modules.tier0.TlsInterceptModule
@@ -49,6 +50,7 @@ object ModuleRegistry {
         ServiceDiscoveryModule(),
         PortScanModule(),
         IotDiscoveryModule(),
+        SegmentationModule(),
         TlsAuditModule(),
         WebExposureModule(),
         DefaultCredentialModule(),

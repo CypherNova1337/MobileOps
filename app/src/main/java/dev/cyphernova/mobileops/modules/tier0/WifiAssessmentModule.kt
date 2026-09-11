@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.net.wifi.WifiManager
 import dev.cyphernova.mobileops.core.attack.AttackPath
+import dev.cyphernova.mobileops.core.attack.EnterpriseWifi
 import dev.cyphernova.mobileops.core.beacon.BeaconProfile
 import dev.cyphernova.mobileops.core.beacon.SsidIntel
 import dev.cyphernova.mobileops.core.capability.Tier
@@ -114,10 +115,16 @@ class WifiAssessmentModule : PentestModule {
         val profile = ApSecurityAnalyser.analyse(ap)
         val beacon = BeaconAudit.profileOf(ap)
         val target = describe(context, ap, profile, beacon)
-        val routes = AttackPath.routesFor(target)
+        // Enterprise routes come from a separate analysis because the question is different:
+        // there is no shared passphrase, so the exposure is in the client and in what the
+        // RADIUS exchange gives away, neither of which the PSK reasoning covers.
+        val posture = enterprisePosture(ap.displaySsid, radios)
+        val routes = (AttackPath.routesFor(target) + EnterpriseWifi.routesFor(posture))
+            .sortedBy { it.viability.rank }
         val open = routes.count { it.viability == AttackPath.Viability.OPEN }
 
         emit(verdictFinding(ap, radios, profile, target, routes, open))
+        EnterpriseWifi.assess(posture).forEach { note -> emit(enterpriseFinding(ap, note)) }
 
         // The routes that are not open are the useful half of the answer — they say what would
         // change it — so they are reported rather than filtered out.
@@ -128,6 +135,64 @@ class WifiAssessmentModule : PentestModule {
 
         return open > 0
     }
+
+    /**
+     * Gathers how every radio under one name authenticates.
+     *
+     * Taken across BSSIDs rather than one at a time, because the finding that matters most on
+     * enterprise wireless is an inconsistency between them: the same SSID served with a
+     * pre-shared key somewhere routes around the 802.1X infrastructure entirely.
+     */
+    private fun enterprisePosture(
+        ssid: String,
+        radios: List<ApObservation>,
+    ): EnterpriseWifi.Posture {
+        val suites = mutableSetOf<String>()
+        val enterprise = mutableListOf<String>()
+        val personal = mutableListOf<String>()
+        var pmfRequired = false
+        var pmfCapable = false
+
+        radios.forEach { radio ->
+            val rsn = BeaconAudit.profileOf(radio)?.rsn
+            val caps = radio.capabilities.uppercase()
+            suites += rsn?.akmSuites.orEmpty()
+
+            val isEnterprise = rsn?.usesEnterprise
+                ?: (caps.contains("EAP") && !caps.contains("WPA2-PSK"))
+            val isPersonal = rsn?.usesPsk ?: caps.contains("PSK")
+
+            if (isEnterprise) enterprise += radio.bssid
+            if (isPersonal) personal += radio.bssid
+            if (rsn?.managementFrameProtectionRequired == true) pmfRequired = true
+            if (rsn?.managementFrameProtectionCapable == true || caps.contains("MFPC")) pmfCapable = true
+        }
+
+        return EnterpriseWifi.Posture(
+            ssid = ssid,
+            akmSuites = suites,
+            enterpriseBssids = enterprise.distinct(),
+            personalBssids = personal.distinct(),
+            managementFrameProtectionRequired = pmfRequired,
+            managementFrameProtectionCapable = pmfCapable,
+        )
+    }
+
+    private fun enterpriseFinding(ap: ApObservation, note: EnterpriseWifi.Note) = Finding(
+        moduleId = id,
+        observedAtEpochMs = System.currentTimeMillis(),
+        severity = when (note.severity) {
+            EnterpriseWifi.Level.CRITICAL -> Severity.CRITICAL
+            EnterpriseWifi.Level.HIGH -> Severity.HIGH
+            EnterpriseWifi.Level.MEDIUM -> Severity.MEDIUM
+            EnterpriseWifi.Level.LOW -> Severity.LOW
+            EnterpriseWifi.Level.INFO -> Severity.INFO
+        },
+        title = "${note.title} — ${ap.displaySsid}",
+        subject = ap.bssid,
+        detail = note.detail,
+        data = mapOf("ssid" to ap.ssid, "bssid" to ap.bssid),
+    )
 
     /** Folds everything passively known about one radio into the analysis's input. */
     private fun describe(

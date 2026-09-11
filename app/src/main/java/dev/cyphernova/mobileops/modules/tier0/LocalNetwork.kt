@@ -24,6 +24,12 @@ data class NetworkPosition(
     val dnsServers: List<String>,
     val interfaceName: String?,
     val transport: Transport,
+    /**
+     * The DHCP search domain. Worth carrying because a network that hands one out has named the
+     * organisation's internal namespace to every client, which is the starting point for finding
+     * its directory infrastructure.
+     */
+    val domain: String? = null,
 ) {
     /**
      * A /31 or /32 is a point-to-point link with no neighbours — which is exactly what a mobile
@@ -82,6 +88,7 @@ object LocalNetwork {
             dnsServers = properties.dnsServers.mapNotNull { it.hostAddress },
             interfaceName = properties.interfaceName,
             transport = transport,
+            domain = properties.domains,
         )
     }
 }
