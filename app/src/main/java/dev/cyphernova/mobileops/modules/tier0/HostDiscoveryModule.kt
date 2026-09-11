@@ -3,6 +3,8 @@ package dev.cyphernova.mobileops.modules.tier0
 import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
+import dev.cyphernova.mobileops.core.iot.DeviceFingerprint
+import dev.cyphernova.mobileops.core.iot.IotPorts
 import dev.cyphernova.mobileops.core.module.Intrusiveness
 import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
@@ -85,37 +87,106 @@ class HostDiscoveryModule : PentestModule {
             }.filterNotNull()
         }
 
+        // One census rather than a finding per address. A sweep of a populated subnet produced
+        // eleven separate notes saying nothing but "this answered", which buried the findings
+        // that meant something — the inventory is one thing, so it reads as one thing.
+        emit(censusFinding(position, live, candidates.size))
+
+        // Anything the sweep could already put a name to gets one. The classifier exists and
+        // was only wired to the IoT module, so a printer found here was reported as an address
+        // with ports rather than as a printer.
         live.forEach { host ->
-            // Two addresses on every sweep are already known; saying so saves the reader working
-            // out why their own handset is in the results.
-            val role = when (host.address) {
-                position.localAddress -> " (this device)"
-                position.gateway -> " (gateway)"
-                else -> ""
-            }
-            emit(
-                Finding(
-                    moduleId = id,
-                    observedAtEpochMs = System.currentTimeMillis(),
-                    severity = Severity.INFO,
-                    title = "Live host ${host.address}$role",
-                    subject = host.address,
-                    detail = "Responded via ${host.method}." +
-                        (host.hostname?.let { " Reverse DNS: $it." } ?: "") +
-                        host.openPorts.takeIf { it.isNotEmpty() }
-                            ?.let { " Answering on ${it.joinToString()}." }.orEmpty(),
-                    data = mapOf(
-                        "method" to host.method,
-                        "hostname" to host.hostname.orEmpty(),
-                        "open_ports" to host.openPorts.joinToString(),
-                        "role" to role.trim().removeSurrounding("(", ")"),
-                    ),
+            val verdict = DeviceFingerprint.classify(
+                DeviceFingerprint.Evidence(
+                    address = host.address,
+                    openPorts = host.openPorts.toSet(),
+                    names = listOfNotNull(host.hostname),
                 ),
             )
+            if (verdict.category == DeviceFingerprint.Category.UNKNOWN) return@forEach
+            if (verdict.category == DeviceFingerprint.Category.ENDPOINT && host.hostname == null) {
+                return@forEach
+            }
+            emit(identifiedFinding(position, host, verdict))
         }
 
         return ModuleOutcome.Completed("${live.size} live host(s) of ${candidates.size} probed.")
     }
+
+    /** The whole sweep as one inventory, which is how a reader wants to see it. */
+    private fun censusFinding(
+        position: NetworkPosition,
+        live: List<LiveHost>,
+        probed: Int,
+    ) = Finding(
+        moduleId = id,
+        observedAtEpochMs = System.currentTimeMillis(),
+        severity = Severity.INFO,
+        title = "${live.size} live host(s) on ${position.cidr}",
+        subject = position.cidr,
+        detail = buildString {
+            append("${live.size} of $probed address(es) answered. ")
+            append(
+                live.joinToString("; ") { host ->
+                    val role = when (host.address) {
+                        position.localAddress -> " (this device)"
+                        position.gateway -> " (gateway)"
+                        else -> ""
+                    }
+                    buildString {
+                        append(host.address).append(role)
+                        host.hostname?.let { append(" [$it]") }
+                        host.openPorts.takeIf { it.isNotEmpty() }
+                            ?.let { append(" ports ${it.joinToString()}") }
+                    }
+                },
+            )
+            append(".")
+        },
+        data = mapOf(
+            "cidr" to position.cidr,
+            "probed" to probed.toString(),
+            "live" to live.size.toString(),
+            "addresses" to live.joinToString { it.address },
+        ),
+    )
+
+    /**
+     * A host the sweep could name. Reported separately from the census because what a thing *is*
+     * decides what happens next — and on a site whose value is in its equipment, that is the
+     * whole point of sweeping at all.
+     */
+    private fun identifiedFinding(
+        position: NetworkPosition,
+        host: LiveHost,
+        verdict: DeviceFingerprint.Verdict,
+    ) = Finding(
+        moduleId = id,
+        observedAtEpochMs = System.currentTimeMillis(),
+        severity = if (verdict.fragility == IotPorts.Fragility.FRAGILE) Severity.LOW else Severity.INFO,
+        title = "${verdict.category.label} — ${host.address}",
+        subject = host.address,
+        detail = buildString {
+            append("Identified as ${verdict.category.label} (${verdict.confidence.label}): ")
+            append("${verdict.basis}. ")
+            if (verdict.significance.isNotBlank()) append("${verdict.significance} ")
+            if (verdict.fragility == IotPorts.Fragility.FRAGILE) {
+                append(
+                    "Handled as ${verdict.fragility.label} — run the IoT module against it " +
+                        "rather than a general-purpose scanner.",
+                )
+            } else {
+                append("Run the IoT module against it to make it identify itself properly.")
+            }
+        },
+        data = mapOf(
+            "host" to host.address,
+            "category" to verdict.category.name,
+            "confidence" to verdict.confidence.name,
+            "fragility" to verdict.fragility.name,
+            "open_ports" to host.openPorts.joinToString(),
+        ),
+    )
 
     private data class LiveHost(
         val address: String,

@@ -315,6 +315,47 @@ class SegmentationModule : PentestModule {
         position: NetworkPosition,
         emit: suspend (Finding) -> Unit,
     ): Int {
+        // Before believing any of this, check that a negative result is even possible. A NAT that
+        // hairpins, an upstream that answers for anything in private space, or a portal
+        // intercepting every flow will make every probe "succeed" — and then the finding is
+        // manufactured rather than observed.
+        val controls = SegmentProbe.controlsFor(position.cidr)
+        val answeringControls = coroutineScope {
+            controls.map { control ->
+                async(Dispatchers.IO) {
+                    if (CROSS_SEGMENT_PORTS.any { isOpen(control, it) } || respondsTo(control)) {
+                        control
+                    } else {
+                        null
+                    }
+                }
+            }.awaitAll().filterNotNull()
+        }
+
+        if (answeringControls.isNotEmpty()) {
+            emit(
+                Finding(
+                    moduleId = id,
+                    observedAtEpochMs = System.currentTimeMillis(),
+                    severity = Severity.INFO,
+                    title = "Cross-segment probing is not reliable from here",
+                    subject = position.cidr,
+                    detail = "Control address(es) ${answeringControls.joinToString()} answered, " +
+                        "and nothing is assigned to them. Something on the path replies " +
+                        "regardless of what is asked for — a NAT that hairpins, an upstream that " +
+                        "answers for any private address, or a portal intercepting every flow. " +
+                        "Every cross-segment probe would 'succeed' against that, so no " +
+                        "reachability conclusion is drawn here. Testing this properly needs a " +
+                        "host on the other segment to compare against.",
+                    data = mapOf(
+                        "controls_probed" to controls.size.toString(),
+                        "controls_answering" to answeringControls.joinToString(),
+                    ),
+                ),
+            )
+            return 0
+        }
+
         val candidates = SegmentProbe.candidatesFor(position.cidr)
         val reached = coroutineScope {
             candidates.chunked(CONCURRENCY).flatMap { batch ->
@@ -336,7 +377,8 @@ class SegmentationModule : PentestModule {
                     title = "No other address plan reachable from ${position.cidr}",
                     subject = position.cidr,
                     detail = "${candidates.size} conventional infrastructure address(es) in other " +
-                        "private ranges were probed and none answered. That is what working " +
+                        "private ranges were probed and none answered, and the control addresses " +
+                        "confirmed a negative result is possible from here. That is what working " +
                         "segmentation looks like from this side — though it only covers the " +
                         "addresses convention puts equipment on, not every possible one.",
                     data = mapOf("probed" to candidates.size.toString(), "reached" to "0"),
@@ -356,11 +398,17 @@ class SegmentationModule : PentestModule {
                     reached.joinToString("; ") { (candidate, port) ->
                         "${candidate.address}${port?.let { " on $it" } ?: " (responds to probe)"}"
                     } +
-                    ". Traffic from this segment is being routed into address space it has no " +
-                    "reason to reach, and nothing dropped it on the way. If this is a guest or " +
-                    "visitor network, that is the finding the engagement is about: everything " +
-                    "downstream — equipment with no authentication of its own, management " +
-                    "interfaces, directory infrastructure — was relying on this separation.",
+                    ". Control addresses in the same private ranges answered nothing, so the " +
+                    "path is not simply replying to everything — these are real. Traffic from " +
+                    "this segment is being routed into address space it has no reason to reach, " +
+                    "and nothing dropped it on the way. If this is a guest or visitor network, " +
+                    "that is the finding the engagement is about: everything downstream — " +
+                    "equipment with no authentication of its own, management interfaces, " +
+                    "directory infrastructure — was relying on this separation.\n\n" +
+                    "Worth confirming what each one actually is before writing it up. A device " +
+                    "at 192.168.100.1 is very often the cable modem behind the router rather " +
+                    "than another segment of the same estate, which is a different finding with " +
+                    "a different owner.",
                 data = mapOf(
                     "source" to position.cidr,
                     "reached" to reached.joinToString { it.first.address },

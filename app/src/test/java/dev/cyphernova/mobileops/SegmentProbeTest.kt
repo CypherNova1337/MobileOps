@@ -63,6 +63,37 @@ class SegmentProbeTest {
         assertFalse(addresses.contains("10.1.1.1"))
     }
 
+    /**
+     * A cross-segment result means nothing unless a negative one is possible. Networks that
+     * answer for addresses which do not exist would otherwise manufacture the finding.
+     */
+    @Test
+    fun `control addresses are offered so a negative result can be proven possible`() {
+        val controls = SegmentProbe.controlsFor("192.168.61.0/24")
+        assertTrue(controls.isNotEmpty())
+        assertTrue(controls.all { SegmentProbe.isPrivate(it) })
+        // They must not collide with the caller's own subnet, for the same reason candidates do not.
+        assertFalse(controls.any { it.startsWith("192.168.61.") })
+    }
+
+    @Test
+    fun `a control never lands in the caller's own subnet whichever one that is`() {
+        listOf("192.168.253.0/24", "10.253.253.0/24", "172.31.253.0/24").forEach { cidr ->
+            val ourPrefix = cidr.substringBeforeLast('.')
+            assertFalse(
+                cidr,
+                SegmentProbe.controlsFor(cidr).any { it.startsWith("$ourPrefix.") },
+            )
+        }
+    }
+
+    @Test
+    fun `controls do not overlap the candidates they are meant to check`() {
+        val cidr = "192.168.61.0/24"
+        val candidates = SegmentProbe.candidatesFor(cidr).map { it.address }.toSet()
+        assertTrue(SegmentProbe.controlsFor(cidr).none { it in candidates })
+    }
+
     @Test
     fun `reverse names are built in the order dns expects`() {
         assertEquals("1.61.168.192.in-addr.arpa", SegmentProbe.reverseName("192.168.61.1"))

@@ -91,6 +91,31 @@ object SegmentProbe {
     }
 
     /**
+     * Addresses that should answer nothing, used to check the probe itself before believing it.
+     *
+     * A cross-segment result is only meaningful if a *negative* one is possible. Plenty of
+     * networks answer indiscriminately for addresses that do not exist — a NAT that hairpins, an
+     * upstream that replies to anything in private space, a captive portal intercepting every
+     * flow — and against any of those every probe "succeeds" and the finding is manufactured
+     * rather than observed.
+     *
+     * These are deliberately in the private ranges but at addresses nothing is conventionally
+     * assigned to, and they exclude the caller's own subnet for the same reason the candidates do.
+     * If one of them answers, the probe path is untrustworthy and the whole cross-segment result
+     * has to be thrown away.
+     */
+    fun controlsFor(cidr: String): List<String> {
+        val ourThird = thirdOctetOf(cidr)
+        val ourSecond = secondOctetOf(cidr)
+        return listOf(
+            // A high .0/24 in 192.168 space that differs from the caller's own.
+            "192.168.${if (ourSecond == 168L && ourThird == 253L) 251L else 253L}.253",
+            "10.253.253.253",
+            "172.31.253.253",
+        ).filterNot { networkOf("$it/24") == networkOf(cidr) }
+    }
+
+    /**
      * The reverse-lookup name for an address.
      *
      * Useful because a resolver that answers this for an address outside the caller's own segment
