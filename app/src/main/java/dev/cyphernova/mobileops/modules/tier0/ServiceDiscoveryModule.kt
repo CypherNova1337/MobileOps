@@ -9,6 +9,7 @@ import dev.cyphernova.mobileops.core.discovery.Ssdp
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -40,6 +41,7 @@ class ServiceDiscoveryModule : PentestModule {
             "devices already make. Fills in the names reverse DNS cannot."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.ACTIVE
+    override val category = ModuleCategory.NETWORK
 
     override suspend fun run(
         context: ModuleContext,

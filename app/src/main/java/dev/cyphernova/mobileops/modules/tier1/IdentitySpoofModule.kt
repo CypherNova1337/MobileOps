@@ -4,6 +4,7 @@ import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -28,6 +29,7 @@ class IdentitySpoofModule : PentestModule {
             "for testing MAC filtering and NAC device policies. Requires root."
     override val requiredTier = Tier.T1_ROOT
     override val intrusiveness = Intrusiveness.ACTIVE
+    override val category = ModuleCategory.PRIVILEGED
 
     override suspend fun run(
         context: ModuleContext,

@@ -4,6 +4,7 @@ import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -31,6 +32,7 @@ class PortScanModule : PentestModule {
             "Full-handshake scanning is logged by the target; SYN scanning requires Tier 1."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.ACTIVE
+    override val category = ModuleCategory.NETWORK
     override val requiresTarget = true
 
     override suspend fun run(

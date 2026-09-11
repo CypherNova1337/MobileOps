@@ -7,6 +7,7 @@ import dev.cyphernova.mobileops.core.exploit.Credential
 import dev.cyphernova.mobileops.core.exploit.DefaultCredentials
 import dev.cyphernova.mobileops.core.exploit.HttpAnalysis
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -32,6 +33,7 @@ class DefaultCredentialModule : PentestModule {
             "first pair that works; form logins are reported, not driven."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.ACTIVE
+    override val category = ModuleCategory.EXPLOIT
     override val requiresTarget = true
 
     override suspend fun run(

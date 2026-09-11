@@ -5,6 +5,7 @@ import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -23,6 +24,7 @@ class WifiSurveyModule : PentestModule {
             "nothing is selected."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.PASSIVE
+    override val category = ModuleCategory.WIRELESS
     override val requiredPermissions = listOf(Manifest.permission.ACCESS_FINE_LOCATION)
 
     override suspend fun run(

@@ -199,6 +199,13 @@ halfway still parses up to the last complete record) and exports as a Markdown r
 
 ## Modules
 
+The module list is grouped into collapsible sections, ordered the way an engagement actually runs
+— survey the air, map the network, look at traffic, then test what was found. Each heading says
+how many of its modules can run on this device, so a section that is entirely tier-locked can be
+seen as such without opening it. Tier-gated modules sit together at the end rather than being
+scattered among usable ones.
+
+
 **Tier 0 — passive**
 - `t0.wifi.sitesurvey` — repeated sweep of the whole RF environment: every AP in range, vendors,
   channel congestion, security census. Needs no network of any kind.

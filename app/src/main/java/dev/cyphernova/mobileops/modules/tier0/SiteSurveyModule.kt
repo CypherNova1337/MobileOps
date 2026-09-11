@@ -6,6 +6,7 @@ import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -30,6 +31,7 @@ class SiteSurveyModule : PentestModule {
             "congestion and a security census. Needs no network — works while walking around."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.PASSIVE
+    override val category = ModuleCategory.WIRELESS
     override val requiredPermissions = listOf(Manifest.permission.ACCESS_FINE_LOCATION)
 
     /** What repeated scans established about one radio. */

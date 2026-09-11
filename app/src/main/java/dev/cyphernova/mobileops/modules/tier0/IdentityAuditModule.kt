@@ -5,6 +5,7 @@ import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.identity.IdentityProbe
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -21,6 +22,7 @@ class IdentityAuditModule : PentestModule {
             "behaviour, what the platform will and will not let an app read or change."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.PASSIVE
+    override val category = ModuleCategory.DEVICE
 
     override suspend fun run(
         context: ModuleContext,

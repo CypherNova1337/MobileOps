@@ -12,6 +12,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -32,7 +33,13 @@ import android.net.VpnService
 import android.security.KeyChain
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Icon
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.ui.MobileOpsViewModel
 import dev.cyphernova.mobileops.ui.ModuleState
@@ -46,6 +53,10 @@ fun ModulesScreen(viewModel: MobileOpsViewModel) {
     val outcomes by viewModel.outcomes.collectAsState()
     val capture by viewModel.captureStatus.collectAsState()
     val states = remember(capabilities, selection, running, outcomes) { viewModel.moduleStates() }
+
+    // Wireless opens by default: it is the only section that works with no network at all, so it
+    // is what is useful before anything else has been established.
+    var expandedSections by remember { mutableStateOf(setOf(ModuleCategory.WIRELESS)) }
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -68,7 +79,83 @@ fun ModulesScreen(viewModel: MobileOpsViewModel) {
             item { CaptureBanner(capture) }
         }
 
-        items(states, key = { it.module.id }) { state -> ModuleCard(state, viewModel) }
+        val grouped = states.groupBy { it.module.category }
+
+        ModuleCategory.entries.forEach { category ->
+            val inCategory = grouped[category].orEmpty()
+            if (inCategory.isEmpty()) return@forEach
+
+            item(key = "section-${category.name}") {
+                CategoryHeader(
+                    category = category,
+                    total = inCategory.size,
+                    ready = inCategory.count { it.blocker == null },
+                    expanded = category in expandedSections,
+                    onToggle = {
+                        expandedSections = if (category in expandedSections) {
+                            expandedSections - category
+                        } else {
+                            expandedSections + category
+                        }
+                    },
+                )
+            }
+
+            if (category in expandedSections) {
+                items(inCategory, key = { it.module.id }) { state -> ModuleCard(state, viewModel) }
+            }
+        }
+    }
+}
+
+/**
+ * A section heading that says how many of its modules can actually run here. The count is the
+ * useful part: on a stock device a whole section can be locked, and seeing "0 of 3 ready" without
+ * expanding it saves opening a drawer full of things that will not work.
+ */
+@Composable
+private fun CategoryHeader(
+    category: ModuleCategory,
+    total: Int,
+    ready: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    category.label,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    category.blurb,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "$ready of $total ready",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (ready == 0) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                )
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+            )
+        }
     }
 }
 

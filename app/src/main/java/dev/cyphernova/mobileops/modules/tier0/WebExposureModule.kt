@@ -5,6 +5,7 @@ import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.exploit.HttpAnalysis
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -25,6 +26,7 @@ class WebExposureModule : PentestModule {
             "and version control, and missing security headers. GET requests only."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.ACTIVE
+    override val category = ModuleCategory.EXPLOIT
     override val requiresTarget = true
 
     override suspend fun run(

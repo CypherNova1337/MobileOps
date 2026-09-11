@@ -4,6 +4,7 @@ import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -25,6 +26,7 @@ class InterfaceCaptureModule(
             "Managed mode: own traffic plus broadcast/multicast only."
     override val requiredTier = Tier.T1_ROOT
     override val intrusiveness = Intrusiveness.PASSIVE
+    override val category = ModuleCategory.PRIVILEGED
 
     override suspend fun run(
         context: ModuleContext,

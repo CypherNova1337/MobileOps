@@ -7,6 +7,7 @@ import dev.cyphernova.mobileops.core.capture.CaptureVpnService
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
 import dev.cyphernova.mobileops.core.module.Intrusiveness
+import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
 import dev.cyphernova.mobileops.core.module.ModuleOutcome
 import dev.cyphernova.mobileops.core.module.PentestModule
@@ -25,6 +26,7 @@ class VpnCaptureModule : PentestModule {
             "Needs no root — the VPN permission prompt is the only gate. Run again to stop."
     override val requiredTier = Tier.T0_STOCK
     override val intrusiveness = Intrusiveness.PASSIVE
+    override val category = ModuleCategory.TRAFFIC
 
     override suspend fun run(
         context: ModuleContext,
