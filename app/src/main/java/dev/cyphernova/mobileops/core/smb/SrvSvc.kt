@@ -103,7 +103,39 @@ object SrvSvc {
          * plumbing; a disk share offered to an anonymous caller is the finding.
          */
         val holdsFiles: Boolean get() = (type and 0x0F) == 0
+
+        /**
+         * What the share's own comment says about who may reach it.
+         *
+         * Consumer NAS firmware writes the access policy into the comment field — a Netgear
+         * router's USB share came back as `read:all-no password;write:all-no password`. That is
+         * the server stating its own permissions, and a report that carries the string while
+         * telling the assessor to go and determine the permissions by hand is withholding the
+         * answer it already has.
+         */
+        val declaredAccess: Set<Access>
+            get() {
+                val text = remark.lowercase()
+                // Only a stated clause counts. A comment that merely contains the word "read"
+                // is prose, and guessing from prose is how a tool invents findings.
+                val open = setOf("all", "everyone", "guest", "anonymous", "no password", "nopassword")
+                fun clause(verb: String): Boolean {
+                    val at = text.indexOf("$verb:")
+                    if (at < 0) return false
+                    val value = text.substring(at + verb.length + 1)
+                        .substringBefore(';')
+                        .substringBefore(',')
+                    return open.any { value.contains(it) }
+                }
+                return buildSet {
+                    if (clause("read")) add(Access.ANONYMOUS_READ)
+                    if (clause("write")) add(Access.ANONYMOUS_WRITE)
+                }
+            }
     }
+
+    /** Access a share declares in its own comment. */
+    enum class Access { ANONYMOUS_READ, ANONYMOUS_WRITE }
 
     /**
      * Reads the share array out of a `NetrShareEnum` response.

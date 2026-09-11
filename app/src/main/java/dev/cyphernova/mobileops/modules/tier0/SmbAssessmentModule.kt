@@ -440,10 +440,12 @@ class SmbAssessmentModule : PentestModule {
     private fun shareFinding(host: String, shares: List<SrvSvc.Share>) = Finding(
         moduleId = id,
         observedAtEpochMs = System.currentTimeMillis(),
-        severity = if (shares.any { it.holdsFiles && !it.isAdministrative }) {
-            Severity.CRITICAL
-        } else {
-            Severity.MEDIUM
+        // A share that states its own access policy has already answered the question. Writable
+        // by anyone with no password is not "worth checking by hand" — it is the finding.
+        severity = when {
+            shares.any { SrvSvc.Access.ANONYMOUS_WRITE in it.declaredAccess } -> Severity.CRITICAL
+            shares.any { it.holdsFiles && !it.isAdministrative } -> Severity.CRITICAL
+            else -> Severity.MEDIUM
         },
         title = "Shares listed without credentials on $host",
         subject = host,
@@ -462,20 +464,41 @@ class SmbAssessmentModule : PentestModule {
                 },
             )
             append(". ")
+
+            val writable = shares.filter { SrvSvc.Access.ANONYMOUS_WRITE in it.declaredAccess }
+            val readable = shares.filter {
+                SrvSvc.Access.ANONYMOUS_READ in it.declaredAccess &&
+                    SrvSvc.Access.ANONYMOUS_WRITE !in it.declaredAccess
+            }
             val files = shares.filter { it.holdsFiles && !it.isAdministrative }
-            if (files.isEmpty()) {
-                append(
+
+            when {
+                writable.isNotEmpty() -> append(
+                    "${writable.joinToString { it.name }} declares in its own comment that it is " +
+                        "both readable and writable with no password. That is the server stating " +
+                        "its permissions, not an inference: anyone on this segment can read what " +
+                        "is on it and write to it. On the device that routes for the segment, a " +
+                        "writable share is also somewhere to put a file and wait for someone to " +
+                        "open it. Client isolation is not in effect here, so every device on the " +
+                        "network can reach it.",
+                )
+
+                readable.isNotEmpty() -> append(
+                    "${readable.joinToString { it.name }} declares in its own comment that it is " +
+                        "readable with no password, so its contents are available to anyone on " +
+                        "this segment.",
+                )
+
+                files.isNotEmpty() -> append(
+                    "${files.joinToString { it.name }} hold files, and the names, layout and " +
+                        "comments are already disclosed. None of them states its access policy, " +
+                        "so whether the contents can be read is the next thing to establish.",
+                )
+
+                else -> append(
                     "None of these is a file share, so the disclosure is the list itself: it " +
                         "names the machine's role and gives an attacker the share names to aim " +
                         "credentials at.",
-                )
-            } else {
-                append(
-                    "${files.joinToString { it.name }} hold files. Whether their contents are " +
-                        "readable depends on the permissions on each one, which is the next " +
-                        "thing to check by hand — but the names, the layout and the comments " +
-                        "are already disclosed to anyone on this segment, and client isolation " +
-                        "is not in effect here.",
                 )
             }
         },
@@ -484,6 +507,12 @@ class SmbAssessmentModule : PentestModule {
             "share_count" to shares.size.toString(),
             "shares" to shares.joinToString { it.name },
             "file_shares" to shares.filter { it.holdsFiles && !it.isAdministrative }
+                .joinToString { it.name },
+            "anonymous_write" to shares
+                .filter { SrvSvc.Access.ANONYMOUS_WRITE in it.declaredAccess }
+                .joinToString { it.name },
+            "anonymous_read" to shares
+                .filter { SrvSvc.Access.ANONYMOUS_READ in it.declaredAccess }
                 .joinToString { it.name },
         ).filterValues { it.isNotBlank() },
     )
