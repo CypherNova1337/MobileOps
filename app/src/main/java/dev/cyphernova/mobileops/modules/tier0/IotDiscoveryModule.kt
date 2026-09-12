@@ -232,11 +232,8 @@ class IotDiscoveryModule : PentestModule {
         severity = Severity.HIGH,
         title = "MQTT broker accepts anonymous clients — $host",
         subject = "$host:1883",
-        detail = "The broker ${result.meaning}. A client that can connect without credentials " +
-            "can subscribe to '#' and receive every message crossing the estate — sensor " +
-            "readings, device commands, and on a surprising number of deployments the " +
-            "credentials devices use to talk to everything else. It can also publish, which on " +
-            "an estate that acts on MQTT means issuing commands.",
+        detail = "The broker ${result.meaning}. Without credentials a client can subscribe to " +
+            "'#' and read every message on the estate, and publish to issue commands.",
         data = mapOf("host" to host, "port" to "1883", "connack" to result.returnCode.toString()),
     )
 
@@ -246,13 +243,10 @@ class IotDiscoveryModule : PentestModule {
         severity = Severity.HIGH,
         title = "Modbus device answering — $host",
         subject = "$host:502",
-        detail = "The device identified itself without authentication: " +
+        detail = "Identified itself without authentication: " +
             identity.entries.joinToString { "${it.key} ${it.value}" } + ". " +
-            "Modbus has no authentication in the protocol at all, so anything that can reach " +
-            "this port can read every register and, on most implementations, write them. The " +
-            "finding is the reachability: this device expects to be on a network nobody else is " +
-            "on. Only a read was issued here — establishing what writing would do is not " +
-            "something to test against live plant.",
+            "Modbus has no authentication at all — anything that reaches this port can read " +
+            "every register and usually write them. Only a read was issued here.",
         data = mapOf("host" to host, "port" to "502") + identity,
     )
 
@@ -263,12 +257,9 @@ class IotDiscoveryModule : PentestModule {
             severity = Severity.CRITICAL,
             title = "DICOM node accepts an unknown caller — $host",
             subject = "$host:$port",
-            detail = "The node accepted an association from the AE title 'MOBILEOPS', which it " +
-                "has never been configured to know, and answered as '${result.respondingAeTitle}'. " +
-                "DICOM's default access control is the calling AE title — a name the caller " +
-                "picks for itself — so accepting an arbitrary one means the only gate is one an " +
-                "attacker controls. A node in this state will generally also answer queries for " +
-                "the studies it holds, which is patient data.",
+            detail = "Accepted an association from the unknown AE title 'MOBILEOPS', answering " +
+                "as '${result.respondingAeTitle}'. The calling AE title is the only control " +
+                "here, and the caller picks it.",
             data = mapOf(
                 "host" to host,
                 "port" to port.toString(),
@@ -282,10 +273,8 @@ class IotDiscoveryModule : PentestModule {
             severity = Severity.MEDIUM,
             title = "DICOM node present but refused the association — $host",
             subject = "$host:$port",
-            detail = "The node rejected an unknown caller (${result.reason}), which is the " +
-                "correct behaviour. It is still an imaging node reachable from this segment, and " +
-                "AE title checking is a weak control — the accepted titles are guessable and " +
-                "frequently documented in the vendor's own manuals.",
+            detail = "Rejected an unknown caller (${result.reason}), which is correct. Still an " +
+                "imaging node reachable from here, and AE titles are guessable.",
             data = mapOf("host" to host, "port" to port.toString(), "reason" to result.reason),
         )
     }
@@ -296,11 +285,9 @@ class IotDiscoveryModule : PentestModule {
         severity = Severity.HIGH,
         title = "RTSP stream answers without credentials — $host",
         subject = "$host:$port",
-        detail = "The stream answered OPTIONS with ${result.status} rather than demanding " +
-            "authentication" + (result.server?.let { ", identifying itself as $it" } ?: "") +
-            ". A camera readable from this segment is a physical surveillance question: what it " +
-            "overlooks decides how much it matters, and in a clinical or reception setting that " +
-            "is usually people who have not consented to being watched by whoever is on the WiFi.",
+        detail = "Answered OPTIONS with ${result.status} rather than demanding authentication" +
+            (result.server?.let { ", identifying as $it" } ?: "") +
+            ". What the camera overlooks decides how much this matters.",
         data = mapOf(
             "host" to host,
             "port" to port.toString(),
@@ -315,11 +302,9 @@ class IotDiscoveryModule : PentestModule {
         severity = Severity.MEDIUM,
         title = "CoAP device exposes its resource directory — $host",
         subject = "$host:5683",
-        detail = "The device returned /.well-known/core, which lists every resource it exposes: " +
+        detail = "Returned /.well-known/core, listing every resource it exposes: " +
             (directory?.take(RESOURCE_CHARS) ?: "(empty)") +
-            ". This is readable by design rather than a misconfiguration, but it is a complete " +
-            "map of the device's interface, and CoAP deployments frequently leave the write " +
-            "methods as unauthenticated as the read ones.",
+            ". Readable by design, but CoAP often leaves writes as unauthenticated as reads.",
         data = mapOf("host" to host, "port" to "5683", "resources" to directory.orEmpty().take(RESOURCE_CHARS)),
     )
 
@@ -329,12 +314,9 @@ class IotDiscoveryModule : PentestModule {
         severity = Severity.HIGH,
         title = "BACnet device answered Who-Is — $host",
         subject = "$host:47808",
-        detail = "Device instance $instance answered a broadcast Who-Is, which is how BACnet " +
-            "discovery works and needs no credential. Base BACnet has no authentication: what " +
-            "can reach it can read every point and usually write them. In a hospital or lab that " +
-            "reaches room pressure differentials, temperatures for stored medicines and " +
-            "sometimes door release, which makes it a safety system rather than a facilities " +
-            "one. Handled as ${fragility.label}.",
+        detail = "Device instance $instance answered a broadcast Who-Is, no credential needed. " +
+            "Base BACnet has no authentication: whatever reaches it can read every point and " +
+            "usually write them. Handled as ${fragility.label}.",
         data = mapOf("host" to host, "port" to "47808", "device_instance" to instance.toString()),
     )
 
@@ -362,11 +344,7 @@ class IotDiscoveryModule : PentestModule {
             )
             append(". Handled as ${verdict.fragility.label}.")
             if (verdict.fragility == IotPorts.Fragility.FRAGILE) {
-                append(
-                    " Do not point a general-purpose scanner at this host — equipment of this " +
-                        "kind faults under scans a server would not notice, and on a live site " +
-                        "that is an outage rather than a finding.",
-                )
+                append(" Do not point a general-purpose scanner at this host.")
             }
         },
         data = mapOf(

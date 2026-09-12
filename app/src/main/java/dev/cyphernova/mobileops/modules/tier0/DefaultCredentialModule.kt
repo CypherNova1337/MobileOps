@@ -79,10 +79,8 @@ class DefaultCredentialModule : PentestModule {
                                 severity = Severity.INFO,
                                 title = "Form login at $base",
                                 subject = base,
-                                detail = "This interface uses a form login rather than HTTP Basic, so " +
-                                    "it is not tested automatically. Try the vendor defaults by hand: " +
-                                    "every form differs and submitting guesses blind risks locking the " +
-                                    "account or the device.",
+                                detail = "Form login rather than HTTP Basic, so it is not tested " +
+                                    "automatically — blind submissions risk locking the account.",
                             ),
                         )
                     }
@@ -129,9 +127,8 @@ class DefaultCredentialModule : PentestModule {
                                 (if (control == null) "not answered at all" else
                                     "accepted (HTTP ${control.status}" +
                                         (HttpAnalysis.pageTitle(control)?.let { ", page '$it'" } ?: "") + ")") +
-                                ". This device does not distinguish a wrong password from a right " +
-                                "one in a way that can be detected from outside, so no credential " +
-                                "result from it would be trustworthy. Test this interface by hand.",
+                                ". A wrong password is indistinguishable from a right one from " +
+                                "outside, so nothing was reported as working.",
                             data = mapOf(
                                 "control_status" to (control?.status?.toString() ?: "no response"),
                                 "control_title" to (control?.let(HttpAnalysis::pageTitle).orEmpty()),
@@ -157,9 +154,7 @@ class DefaultCredentialModule : PentestModule {
                                 "credential was refused, so the device does discriminate. It " +
                                 "answered HTTP ${evidence.status} with ${evidence.body.length} bytes" +
                                 (HttpAnalysis.pageTitle(evidence)?.let { ", page titled '$it'" } ?: "") +
-                                ". Verify by hand before reporting: open $base in a browser and " +
-                                "enter $working. If the browser disagrees, treat this as a false " +
-                                "positive and tell me what it showed.",
+                                ". Verify by hand: open $base and enter $working.",
                             data = mapOf(
                                 "username" to working.username,
                                 "vendor" to working.vendor,

@@ -208,9 +208,8 @@ class BleReconModule : PentestModule {
                 subject = "BLE environment",
                 detail = "Devices beaconing into Apple's Find My network: " +
                     trackers.joinToString { "${it.address} at ${it.strongest} dBm" } +
-                    ". These are location beacons. In a space where none is expected, that is a " +
-                    "physical surveillance finding rather than a network one. Addresses rotate, so " +
-                    "repeat a scan to tell a stationary tracker from one passing through.",
+                    ". Location beacons. Addresses rotate, so rescan to tell a stationary " +
+                    "tracker from one passing through.",
                 data = mapOf(
                     "tracker_count" to trackers.size.toString(),
                     "addresses" to trackers.joinToString { it.address },

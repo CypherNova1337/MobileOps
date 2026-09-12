@@ -116,10 +116,8 @@ class WebExposureModule : PentestModule {
                             severity = Severity.MEDIUM,
                             title = "Web root served without authentication",
                             subject = base,
-                            detail = "The root page returns ${root.status} with no login form, no " +
-                                "authentication challenge, and nothing in its title or body that " +
-                                "says it is refusing. Whatever it exposes is reachable by anyone " +
-                                "on this network." +
+                            detail = "Root returns ${root.status} with no login form, no " +
+                                "challenge, and nothing saying it refuses." +
                                 (HttpAnalysis.pageTitle(root)?.let { " Titled '$it'." } ?: ""),
                         ),
                     )
@@ -166,11 +164,9 @@ class WebExposureModule : PentestModule {
                             severity = Severity.INFO,
                             title = "Path probing skipped on $base",
                             subject = base,
-                            detail = "Neither control request completed, so there is no way to tell " +
-                                "whether this device distinguishes a real path from an invented " +
-                                "one. Path findings are only meaningful against that baseline, so " +
-                                "none were produced. The host answered its root, so it is worth " +
-                                "trying again or looking by hand.",
+                            detail = "Neither control request completed, so there is no baseline " +
+                                "for telling a real path from an invented one. No path findings " +
+                                "were produced.",
                             data = mapOf("controls_attempted" to CONTROL_PATHS.size.toString()),
                         ),
                     )
@@ -193,9 +189,8 @@ class WebExposureModule : PentestModule {
                             detail = "A deliberately nonexistent path returned HTTP " +
                                 "${answeringControl.status} with ${answeringControl.body.length} bytes" +
                                 (HttpAnalysis.pageTitle(answeringControl)?.let { ", titled '$it'" } ?: "") +
-                                ". This device does not distinguish a real path from an invented " +
-                                "one, so path probing cannot tell you anything here and was " +
-                                "skipped. Anything genuinely exposed must be found by hand.",
+                                ". This device answers every path the same, so path probing was " +
+                                "skipped.",
                             data = mapOf(
                                 "control_status" to answeringControl.status.toString(),
                                 "control_bytes" to answeringControl.body.length.toString(),
@@ -279,11 +274,8 @@ class WebExposureModule : PentestModule {
                             title = "One page served for several paths on $base",
                             subject = base,
                             detail = "${sharedPaths.joinToString()} all returned bodies of the same " +
-                                "size (${shared.joinToString()} bytes), so this is one page under " +
-                                "several names rather than something each path exposes, and none " +
-                                "of them is reported as a finding. It does differ from what an " +
-                                "invented path returns, so those paths probably do exist — behind " +
-                                "a login, which is the arrangement working rather than failing.",
+                                "size (${shared.joinToString()} bytes) — one page under several " +
+                                "names, not something each path exposes. None is reported.",
                             data = mapOf(
                                 "paths" to sharedPaths.joinToString(),
                                 "bytes" to shared.joinToString(),

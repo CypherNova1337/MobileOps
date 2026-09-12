@@ -200,9 +200,7 @@ class BluetoothClassicModule : PentestModule {
                 title = "Bluetooth: ${devices.size} discoverable device(s)",
                 subject = "Bluetooth environment",
                 detail = buildString {
-                    append("Every device listed here is broadcasting that it will accept a ")
-                    append("pairing attempt, which is a state almost nobody sets deliberately ")
-                    append("and almost nobody turns off. Types: ")
+                    append("Each is broadcasting that it will accept a pairing attempt. Types: ")
                     append(byClass.entries.sortedByDescending { it.value }
                         .joinToString { "${it.value}× ${it.key}" })
                     append(". $dataCapable advertise a data-carrying service rather than audio only.")
@@ -233,10 +231,7 @@ class BluetoothClassicModule : PentestModule {
                 }
                 append(". ${device.rssi} dBm. ")
                 if (dataPath) {
-                    append(
-                        "It offers a service that moves data rather than audio — networking, " +
-                            "object transfer or information — which is the profile worth following up.",
-                    )
+                    append("Carries data rather than audio — worth following up.")
                 }
             },
             data = mapOf(

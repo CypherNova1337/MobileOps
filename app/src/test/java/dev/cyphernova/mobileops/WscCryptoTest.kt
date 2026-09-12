@@ -118,6 +118,22 @@ class WscCryptoTest {
         assertNull(WscCrypto.decryptSettings(right, ByteArray(8)))
     }
 
+    /**
+     * Unpadding is not proof of the right key: AES-CBC/PKCS5 accepts garbage roughly once in
+     * every 256 attempts, and a fresh IV per wrap means that lands eventually rather than never.
+     * It cost a test failure on a clean tree to notice. A wrong PIN must always read as a miss,
+     * so the plaintext has to parse as an attribute stream before it counts.
+     */
+    @Test
+    fun `a wrong key never produces settings, however many times it is tried`() {
+        val right = WscCrypto.SessionKeys(ByteArray(32), ByteArray(16) { 1 }, ByteArray(32))
+        val wrong = WscCrypto.SessionKeys(ByteArray(32), ByteArray(16) { 2 }, ByteArray(32))
+        val plaintext = Wsc.Builder().put(0x1040, ByteArray(16)).build()
+        repeat(2000) {
+            assertNull(WscCrypto.decryptSettings(wrong, WscCrypto.encryptSettings(right, plaintext)))
+        }
+    }
+
     @Test
     fun `the authenticator is the first sixty-four bits of the hmac`() {
         val authKey = ByteArray(32) { 5 }

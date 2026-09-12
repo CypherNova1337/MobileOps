@@ -93,10 +93,17 @@ class EvidenceStore(private val directory: File) {
                         "absence: see what did not answer, at the end.",
                 )
             } else {
+                // Titles only. The detail is a few lines further down under Findings, and
+                // repeating a sentence of it here just makes the list longer than the thing it
+                // is meant to be an index to.
                 actOn.forEachIndexed { index, occurrence ->
                     val finding = occurrence.finding
-                    appendLine("${index + 1}. **${finding.title}** — ${finding.severity.label}")
-                    appendLine("   ${ReportLayout.headline(finding)}")
+                    appendLine(
+                        "${index + 1}. [${finding.severity.label}] ${finding.title}" +
+                            finding.subject.takeIf {
+                                it.isNotBlank() && !finding.title.contains(it)
+                            }?.let { " — $it" }.orEmpty(),
+                    )
                 }
             }
             appendLine()

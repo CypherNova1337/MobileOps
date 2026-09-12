@@ -105,10 +105,7 @@ object AttackPath {
             nearest?.let {
                 append("Next cheapest is ${it.name} — ${it.requires ?: it.rationale} ")
             }
-            append(
-                "Routes marked blocked are limits of this hardware, not of the target: a radio " +
-                    "that does monitor mode and injection opens most of them.",
-            )
+            append("Blocked routes are limits of this handset, not of the target.")
         }
     }
 

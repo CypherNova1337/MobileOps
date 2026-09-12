@@ -184,14 +184,9 @@ class HandshakeCrackModule : PentestModule {
         severity = Severity.CRITICAL,
         title = "WPA2 passphrase recovered for $ssid",
         subject = ssid,
-        detail = "The passphrase is '${result.passphrase}', found after ${result.tried} " +
-            "candidate(s) against a ${captures.first().label}. It has been loaded into the join " +
-            "module, so 'Join target network' will now get onto $ssid without anything further.\n\n" +
-            "What this establishes is about the passphrase, not the protocol: WPA2 held up " +
-            "exactly as designed, and the key behind it did not. The search ran entirely offline " +
-            "against a captured handshake, so the AP saw nothing, logged nothing and could not " +
-            "have rate-limited it. Lengthening the passphrase is the fix; nothing configured on " +
-            "the AP changes this.",
+        detail = "Passphrase '${result.passphrase}', found after ${result.tried} candidate(s) " +
+            "against a ${captures.first().label}. Loaded into the join module. The search ran " +
+            "offline, so the AP logged nothing and could not rate-limit it. Fix: a longer key.",
         data = mapOf(
             "ssid" to ssid,
             "passphrase" to result.passphrase,
@@ -215,16 +210,11 @@ class HandshakeCrackModule : PentestModule {
         detail = buildString {
             append("$tried candidate(s) tested against a ${captures.first().label} ")
             append(if (complete) "and the list was exhausted. " else "before the time budget ran out. ")
+            append("Not proof the key is strong — the capture can be re-worked offline. ")
             append(
-                "This says the passphrase is not among the candidates tried. It does not say the " +
-                    "network is secure — the same capture can be worked on indefinitely, on " +
-                    "faster hardware, against a larger list, with nothing on the network able to " +
-                    "notice. ",
-            )
-            append(
-                wordlist?.let { "Wordlist: ${it.name}. " }
-                    ?: "No wordlist supplied — only the built-in patterns and names derived from " +
-                    "the SSID were tried. Drop one into the wordlists folder for a real search. ",
+                wordlist?.let { "Wordlist: ${it.name}." }
+                    ?: "No wordlist supplied; only built-in patterns and SSID-derived names " +
+                    "were tried. Drop one into the wordlists folder for a real search.",
             )
         },
         data = mapOf(
@@ -246,8 +236,7 @@ class HandshakeCrackModule : PentestModule {
             subject = directory.name,
             detail = "Read from ${directory.absolutePath}: " +
                 bySsid.entries.joinToString { "${it.key} (${it.value})" } +
-                ". $pmkids are PMKIDs, which need no client to have been present, and " +
-                "${captures.size - pmkids} are four-way handshakes.",
+                ". $pmkids PMKID(s), ${captures.size - pmkids} four-way handshake(s).",
             data = mapOf(
                 "captures" to captures.size.toString(),
                 "networks" to bySsid.keys.joinToString(),

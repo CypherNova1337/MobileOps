@@ -212,7 +212,7 @@ class AttackPathTest {
         val verdict = AttackPath.verdict(target())
         assertTrue(verdict.contains("No route is open from this handset"))
         assertTrue(verdict.contains("Next cheapest"))
-        assertTrue(verdict.contains("limits of this hardware, not of the target"))
+        assertTrue(verdict.contains("limits of this handset, not of the target"))
         assertFalse(verdict.contains("secure"))
     }
 

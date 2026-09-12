@@ -218,11 +218,8 @@ class PrinterModule : PentestModule {
         severity = Severity.INFO,
         title = "PJL did not answer on $host",
         subject = host,
-        detail = "Port 9100 was asked for the device inventory and gave nothing usable: " +
-            stoppedAt + ". A printer that refuses the connection is not serving a job socket; " +
-            "one that accepts it and stays silent has PJL disabled or is waiting for print data " +
-            "rather than commands. Either is worth knowing — it is the difference between a " +
-            "hardened device and one that was never asked.",
+        detail = "Port 9100 gave nothing usable: " + stoppedAt + ". A refused connection means " +
+            "no job socket; accepted and silent means PJL is disabled.",
         data = mapOf("host" to host, "stopped_at" to stoppedAt),
     )
 
@@ -233,24 +230,17 @@ class PrinterModule : PentestModule {
         title = "Printer answers IPP without credentials — $host",
         subject = host,
         detail = buildString {
-            append("Get-Printer-Attributes was answered by an unauthenticated caller. ")
+            append("Get-Printer-Attributes answered an unauthenticated caller. ")
             attributes.makeAndModel?.let { append("Model '$it'. ") }
             attributes.firmware?.let { append("Firmware '$it'. ") }
             attributes.location?.let { append("Location '$it'. ") }
             attributes.info?.let { append("Described as '$it'. ") }
             attributes.queuedJobs?.let { append("$it job(s) queued. ") }
             if (attributes.acceptsUnauthenticated) {
-                append(
-                    "It reports uri-authentication-supported as 'none', which is the device " +
-                        "stating that it will take a job from anyone who can reach it. ",
-                )
+                append("Reports uri-authentication-supported as 'none' — it takes a job from anyone. ")
             }
             if (attributes.hasCleartextUri) {
-                append(
-                    "It advertises a cleartext ipp:// URI, so documents and any credential sent " +
-                        "with them cross this segment unencrypted — and client isolation is not " +
-                        "in effect here.",
-                )
+                append("Advertises a cleartext ipp:// URI, so documents cross the segment unencrypted.")
             }
         },
         data = mapOf(
@@ -269,12 +259,7 @@ class PrinterModule : PentestModule {
         severity = Severity.INFO,
         title = "IPP did not answer on $host",
         subject = host,
-        detail = "Get-Printer-Attributes was sent and no usable reply came back. What each " +
-            "attempt did: " + attempts.joinToString("; ") + ". A refused connection means 631 " +
-            "is not serving IPP; an HTTP status with a body that did not decode means the path " +
-            "is wrong for this model; an IPP error status means the device answered and " +
-            "declined. Any of those is worth a look by hand before concluding the printer is " +
-            "reticent.",
+        detail = "Get-Printer-Attributes got no usable reply. " + attempts.joinToString("; ") + ".",
         data = mapOf("host" to host, "attempted" to attempts.joinToString("; ")),
     )
 
@@ -290,14 +275,12 @@ class PrinterModule : PentestModule {
         title = "Printer accepts PJL commands from anyone — $host",
         subject = host,
         detail = buildString {
-            append("Port 9100 is a raw job socket with no authentication, and it answered. ")
-            model?.let { append("It identifies itself as '$it'. ") }
+            append("Port 9100 answered — a raw job socket with no authentication. ")
+            model?.let { append("Identifies as '$it'. ") }
             append("${settings.size} setting(s) read")
-            if (files.isNotEmpty()) append(" and ${files.size} storage entr(y/ies) listed")
+            if (files.isNotEmpty()) append(", ${files.size} storage entr(y/ies) listed")
             append(
-                ". Only read commands were sent, but the same socket takes the ones that change " +
-                    "defaults, overwrite the panel message and delete stored files, and it will " +
-                    "take them from any device on this segment.",
+                ". Only read commands were sent; the socket also accepts write and delete.",
             )
         },
         data = mapOf(
@@ -325,7 +308,7 @@ class PrinterModule : PentestModule {
         },
         title = "Printer configuration readable without credentials — $host",
         subject = host,
-        detail = "Read by a caller presenting nothing: " +
+        detail = "Read with no credentials: " +
             concerns.joinToString("; ") { "${it.key}=${it.value} — ${it.meaning}" } + ".",
         data = mapOf(
             "host" to host,
@@ -351,8 +334,7 @@ class PrinterModule : PentestModule {
             )
             if (files.size > STORAGE_LISTED) append("; and ${files.size - STORAGE_LISTED} more")
             append(
-                ". Held print jobs and scanned documents live here on models that support them, " +
-                    "and the same command set that listed this can read the contents.",
+                ". The same command set that listed this can read the contents.",
             )
         },
         data = mapOf(

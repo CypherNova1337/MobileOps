@@ -92,11 +92,7 @@ class SsidIntelModule : PentestModule {
                     append("${factory.size} still carry an unchanged factory SSID")
                     if (vendors.isNotEmpty()) append(" (${vendors.joinToString()})")
                     append(", $concerns name(s) raise something worth following up. ")
-                    append(
-                        "A factory name is not proof of a weak key, but it is strong evidence " +
-                            "nobody opened the admin interface — which is where the default " +
-                            "administrative password still is.",
-                    )
+                    append("A factory name suggests the admin interface was never opened.")
                 },
                 data = mapOf(
                     "networks" to names.size.toString(),

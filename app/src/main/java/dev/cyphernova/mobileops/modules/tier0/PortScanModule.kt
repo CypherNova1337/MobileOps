@@ -111,9 +111,8 @@ class PortScanModule : PentestModule {
                 if (verdict.significance.isNotBlank()) append("${verdict.significance} ")
                 if (verdict.fragility == IotPorts.Fragility.FRAGILE) {
                     append(
-                        "Handled as ${verdict.fragility.label}. This scan has already completed, " +
-                            "but do not point a general-purpose scanner at it — equipment of this " +
-                            "kind faults under scans a server would not notice.",
+                        "Handled as ${verdict.fragility.label}; do not point a general-purpose " +
+                            "scanner at it.",
                     )
                 }
             },
@@ -208,16 +207,12 @@ class PortScanModule : PentestModule {
         21 -> "FTP transmits credentials in cleartext unless FTPS is enforced."
         // Not "confirm signing is required and v1 is disabled" any more: the SMB exposure module
         // answers both, so saying it here only hands work back that the tool already does.
-        445, 139 -> "SMB exposed on the LAN. Run the SMB exposure module against this host for " +
-            "the signing policy, whether SMB1 is still enabled, and whether it accepts a null " +
-            "session."
+        445, 139 -> "SMB on the LAN. The SMB exposure module reports signing, SMB1 and null sessions."
         // Not "confirm NLA is required": stating what the exposure is beats instructing the
         // operator to go and establish it, and this module cannot establish it from a port.
-        3389 -> "RDP exposed on the LAN. Where Network Level Authentication is off, the logon " +
-            "screen itself is reachable pre-authentication."
+        3389 -> "RDP exposed. Without Network Level Authentication the logon screen is reachable."
         5900 -> "VNC often ships without transport encryption."
-        80, 8080, 8000 -> "Cleartext HTTP. The web exposure module reports whether it redirects " +
-            "to TLS, what it serves, and whether it asks for a credential."
+        80, 8080, 8000 -> "Cleartext HTTP. The web exposure module reports what it serves."
         else -> null
     }
 

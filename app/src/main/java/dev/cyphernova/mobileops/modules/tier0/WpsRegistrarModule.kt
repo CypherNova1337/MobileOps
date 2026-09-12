@@ -254,10 +254,8 @@ class WpsRegistrarModule : PentestModule {
                 title = "WPA passphrase retrieved without authentication from $host",
                 subject = ssid ?: host,
                 detail = "GetAPSettings returned the AP's live wireless configuration to a single " +
-                    "unauthenticated SOAP request — no PIN, no registrar exchange, no attempt " +
-                    "limit. Anyone who can reach this device on the LAN, including a guest on the " +
-                    "guest network if it is not isolated, can read the main network's passphrase. " +
-                    "Network '${ssid ?: "unknown"}', key '$key'. Disable UPnP and WPS immediately.",
+                    "unauthenticated SOAP request — no PIN, no exchange, no attempt limit. " +
+                    "Network '${ssid ?: "unknown"}', key '$key'. Disable UPnP and WPS.",
                 data = mapOf(
                     "ssid" to ssid.orEmpty(),
                     "network_key" to key,
@@ -425,9 +423,7 @@ class WpsRegistrarModule : PentestModule {
             "Network '${result.ssid ?: "unknown"}', key '${result.networkKey ?: "not returned"}'" +
             (result.authType?.let { ", $it" } ?: "") +
             (result.encryptionType?.let { "/$it" } ?: "") +
-            ". Anyone on this LAN can read the wireless passphrase, and a default PIN derived " +
-            "from the MAC address means anyone within radio range can too. Disable WPS on the AP; " +
-            "changing the passphrase alone does not close this.",
+            ". Disable WPS on the AP; changing the passphrase alone does not close this.",
         data = mapOf(
             "ssid" to result.ssid.orEmpty(),
             "network_key" to result.networkKey.orEmpty(),
@@ -466,9 +462,8 @@ class WpsRegistrarModule : PentestModule {
         subject = service.controlUrl,
         detail = "Across $attempts attempt(s) the AP distinguished a wrong first half from a wrong " +
             "second half by refusing at different points in the exchange. That is the WPS design " +
-            "flaw itself, and it is live here over UPnP where the radio-side PIN lockout does not " +
-            "apply: the full PIN is recoverable in about eleven thousand attempts, which this " +
-            "path serves at HTTP speed rather than radio speed. Disable WPS.",
+            "flaw itself, live here over UPnP where the radio-side lockout does not apply. " +
+            "The full PIN is recoverable in about eleven thousand attempts. Disable WPS.",
         data = mapOf("attempts" to attempts.toString(), "control_url" to service.controlUrl),
     )
 

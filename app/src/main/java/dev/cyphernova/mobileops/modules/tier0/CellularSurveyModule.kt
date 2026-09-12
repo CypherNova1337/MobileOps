@@ -159,10 +159,7 @@ class CellularSurveyModule : PentestModule {
                 subject = serving.identifier,
                 detail = "${serving.generation.label} on ${serving.operator}. " +
                     "Cell ${serving.identifier}, area ${serving.areaCode}, channel ${serving.channel}, " +
-                    "${serving.dbm} dBm (${CellularIntel.quality(serving.dbm, serving.generation)}). " +
-                    "Recorded as the baseline for this location: a cell that appears here later " +
-                    "with a different identity, or an unexpectedly strong signal on an older " +
-                    "generation, is what a rogue site looks like from the handset's side.",
+                    "${serving.dbm} dBm (${CellularIntel.quality(serving.dbm, serving.generation)}).",
                 data = mapOf(
                     "generation" to serving.generation.label,
                     "operator" to serving.operator,
@@ -248,11 +245,9 @@ class CellularSurveyModule : PentestModule {
                     severity = Severity.INFO,
                     title = "No neighbour cells reported",
                     subject = "Cellular environment",
-                    detail = "The modem returned only the cell it is attached to. Android " +
-                        "rate-limits fresh cell measurements and many modems will not report " +
-                        "neighbours at all while idle, so this is a limit of the handset rather " +
-                        "than evidence that no other cells are in range. Running the module again " +
-                        "after a minute, or while moving, usually turns some up.",
+                    detail = "Only the serving cell was returned. Android rate-limits cell " +
+                        "measurements and many modems report no neighbours while idle, so this " +
+                        "is a handset limit rather than an empty band.",
                     data = mapOf("neighbour_count" to "0"),
                 ),
             )
@@ -270,8 +265,7 @@ class CellularSurveyModule : PentestModule {
                     neighbours.joinToString {
                         "${it.generation.label} ${it.identifier} (${it.operator}, ${it.dbm} dBm)"
                     } +
-                    ". These are the handover candidates from this position, and together with " +
-                    "the serving cell they are the baseline a later visit is compared against.",
+                    ". Handover candidates from this position.",
                 data = mapOf(
                     "neighbour_count" to neighbours.size.toString(),
                     "neighbours" to neighbours.joinToString { "${it.identifier}@${it.dbm}dBm" },

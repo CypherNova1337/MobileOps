@@ -169,9 +169,7 @@ class WardriveModule : PentestModule {
                 subject = file.name,
                 detail = "${rows.size} geolocated sighting(s) of $distinctAps distinct AP(s) from " +
                     "$positions position(s), written to ${file.absolutePath} in WiGLE CSV format. " +
-                    "Import it into a mapping tool, or upload it, to see the coverage footprint. " +
-                    "Walk the site perimeter with this running to establish where each network is " +
-                    "audible from outside the building." +
+                    "Import it into a mapping tool to see the coverage footprint." +
                     if (unlocated > 0) " $unlocated sweep(s) had no fix and were dropped." else "",
                 data = mapOf(
                     "csv_path" to file.absolutePath,
@@ -217,9 +215,8 @@ class WardriveModule : PentestModule {
                     "${furthest.authMode}) was still readable at ${furthest.rssi} dBm " +
                     "${metres.toInt()} m from where this sweep began, at " +
                     "${"%.5f".format(Locale.US, furthest.latitude)}, " +
-                    "${"%.5f".format(Locale.US, furthest.longitude)}. Coverage extending that far " +
-                    "is the part of a wireless assessment that is hardest to dispute: an attacker " +
-                    "does not need to be in the building.",
+                    "${"%.5f".format(Locale.US, furthest.longitude)}. An attacker does not need " +
+                    "to be in the building.",
                 data = mapOf(
                     "bssid" to furthest.mac,
                     "ssid" to furthest.name,

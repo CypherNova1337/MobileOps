@@ -333,12 +333,10 @@ class WifiAssessmentModule : PentestModule {
             severity = Severity.HIGH,
             title = "WPS PIN candidates — ${ap.displaySsid}",
             subject = ap.bssid,
-            detail = "A long line of consumer firmware generated the PIN on the sticker from the " +
-                "MAC address with a published function, so it is computable rather than " +
-                "guessable. ${derived.size} derived from ${ap.bssid}, plus " +
-                "${candidates.size - derived.size} fixed vendor defaults. Top candidates: " +
-                candidates.take(6).joinToString { "${it.pin} (${it.algorithm})" } +
-                ". The registrar module tries these first, in this order.",
+            detail = "Much consumer firmware derives the sticker PIN from the MAC, so it is " +
+                "computable rather than guessable. ${derived.size} derived from ${ap.bssid}, plus " +
+                "${candidates.size - derived.size} vendor defaults. Top: " +
+                candidates.take(6).joinToString { "${it.pin} (${it.algorithm})" } + ".",
             data = mapOf(
                 "bssid" to ap.bssid,
                 "pin_candidates" to candidates.take(12).joinToString { it.pin },

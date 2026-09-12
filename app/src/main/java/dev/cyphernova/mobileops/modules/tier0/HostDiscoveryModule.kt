@@ -171,12 +171,9 @@ class HostDiscoveryModule : PentestModule {
             append("${verdict.basis}. ")
             if (verdict.significance.isNotBlank()) append("${verdict.significance} ")
             if (verdict.fragility == IotPorts.Fragility.FRAGILE) {
-                append(
-                    "Handled as ${verdict.fragility.label} — run the IoT module against it " +
-                        "rather than a general-purpose scanner.",
-                )
+                append("Handled as ${verdict.fragility.label} — use the IoT module, not a scanner.")
             } else {
-                append("Run the IoT module against it to make it identify itself properly.")
+                append("Run the IoT module against it for a firmer identification.")
             }
         },
         data = mapOf(

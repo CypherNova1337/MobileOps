@@ -53,12 +53,9 @@ class TlsAuditModule : PentestModule {
                         severity = Severity.INFO,
                         title = "TLS handshake failed on $host:$port",
                         subject = "$host:$port",
-                        detail = "No TLS handshake completed, and the certificate is not the " +
-                            "reason: this audit accepts any chain so that it can examine one. " +
-                            "That leaves a closed port, a service speaking plaintext on a port " +
-                            "that looks like TLS, or a device that refused the protocols on " +
-                            "offer — the last of which is itself worth a look, since it means " +
-                            "nothing modern would connect to it either.",
+                        detail = "No handshake completed. The certificate is not the reason — " +
+                            "this audit accepts any chain. That leaves a closed port, plaintext " +
+                            "on a TLS port, or a device refusing the protocols offered.",
                     ),
                 )
                 return@forEach

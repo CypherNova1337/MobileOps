@@ -429,12 +429,9 @@ class SmbAssessmentModule : PentestModule {
         severity = Severity.HIGH,
         title = "SMB1 is enabled on $host",
         subject = host,
-        detail = "The server negotiated NT LM 0.12. SMB1 is the protocol WannaCry and NotPetya " +
-            "spread over; it cannot be signed in any meaningful way, it leaks share and user " +
-            "enumeration to unauthenticated callers, and Microsoft has shipped it disabled by " +
-            "default for years. Where this is a medical device or an embedded appliance it is " +
-            "usually there because the vendor's software still requires it, which makes it a " +
-            "segmentation finding rather than a patching one.",
+        detail = "Negotiated NT LM 0.12. SMB1 cannot be meaningfully signed and leaks share " +
+            "and user enumeration to unauthenticated callers. On an appliance it is usually a " +
+            "vendor requirement, which makes it a segmentation problem rather than a patch.",
         data = mapOf("host" to host, "smb1_enabled" to "true"),
     )
 
@@ -447,19 +444,14 @@ class SmbAssessmentModule : PentestModule {
         detail = buildString {
             append(
                 if (negotiated.signingEnabled) {
-                    "Signing is enabled but not required, which means a client that does not ask " +
-                        "for it is served anyway. "
+                    "Signing enabled but not required, so a client that declines it is served anyway. "
                 } else {
-                    "Signing is not offered at all. "
+                    "Signing not offered. "
                 },
             )
             append(
-                "That is the condition an NTLM relay needs: an authentication captured from any " +
-                    "user on this segment — a coerced connection, a poisoned name lookup, a " +
-                    "malicious link — can be replayed against this host as that user, without " +
-                    "the password ever being known or cracked. Client isolation is not in effect " +
-                    "on this segment, so any device here can reach any other to collect one. " +
-                    "Dialect ${negotiated.dialectName}.",
+                "That is what an NTLM relay needs: an authentication captured from any user here " +
+                    "can be replayed against this host as them. Dialect ${negotiated.dialectName}.",
             )
         },
         data = mapOf(
@@ -518,35 +510,26 @@ class SmbAssessmentModule : PentestModule {
                 )
                 append(". ")
 
-                if (attached.isNotEmpty()) {
-                    append(
-                        "The session attached to ${attached.joinToString { it.name }} — that is " +
-                            "not an inference from a name or a comment, it is the server " +
-                            "granting a tree connect to a caller with no credentials. ",
+                when {
+                    attached.isNotEmpty() -> append(
+                        "The session attached to ${attached.joinToString { it.name }} — the " +
+                            "server granted a tree connect to a caller with no credentials.",
                     )
-                }
-                if (writable.isNotEmpty()) {
-                    append(
-                        "${writable.joinToString { it.name }} states in its own comment that it " +
-                            "is writable with no password, so this is somewhere to leave a file " +
-                            "as well as somewhere to read one. ",
+                    writable.isNotEmpty() -> append(
+                        "${writable.joinToString { it.name }} declares itself writable with no " +
+                            "password.",
                     )
-                }
-                if (attached.isNotEmpty() || writable.isNotEmpty()) {
-                    append(
-                        "Client isolation is not in effect on this segment, so every device on " +
-                            "the network can reach it.",
-                    )
-                } else if (refused.isNotEmpty()) {
-                    append(
-                        "The server refused a tree connect to all of them " +
+                    refused.isNotEmpty() -> append(
+                        "Tree connect refused on all of them " +
                             "(${refused.joinToString { "${it.name}: ${access[it.name]}" }}), so " +
-                            "the disclosure is the list itself: it names the machine's role and " +
-                            "gives an attacker the share names to aim credentials at.",
+                            "the disclosure is the list itself.",
                     )
-                } else {
+                    else -> append("No file shares here, so the disclosure is the list itself.")
+                }
+                if (writable.isNotEmpty() && attached.isNotEmpty()) {
                     append(
-                        "None of these is a file share, so the disclosure is the list itself.",
+                        " ${writable.joinToString { it.name }} also declares itself writable with " +
+                            "no password.",
                     )
                 }
             },
@@ -573,11 +556,8 @@ class SmbAssessmentModule : PentestModule {
         severity = Severity.INFO,
         title = "Null session could not list shares on $host",
         subject = host,
-        detail = "The anonymous session was granted, but enumerating shares over srvsvc did not " +
-            "complete: " + (stoppedAt ?: "no reason was recorded") + ". The session itself is " +
-            "still the finding above; this says the server did not go on to hand over its share " +
-            "list, which is the restriction working. Listing shares by name over SMB1 — which " +
-            "this host still speaks — is the next thing to try by hand.",
+        detail = "Session granted, but srvsvc enumeration did not complete: " +
+            (stoppedAt ?: "no reason recorded") + ". The server did not hand over its share list.",
         data = mapOf("host" to host, "stopped_at" to stoppedAt.orEmpty())
             .filterValues { it.isNotBlank() },
     )
@@ -588,11 +568,7 @@ class SmbAssessmentModule : PentestModule {
         severity = Severity.HIGH,
         title = "Null session accepted on $host",
         subject = host,
-        detail = "The server completed a session setup for a caller presenting no username and " +
-            "no password. What that session can then reach depends on the share and registry " +
-            "permissions, but on a file server it commonly includes the share list, and on " +
-            "older configurations the local user and group list as well — which is the input to " +
-            "a password attack against every other service on the estate. " +
+        detail = "Session setup completed for a caller with no username and no password. " +
             challenge?.describe().orEmpty(),
         data = mapOf("host" to host, "null_session" to "true"),
     )
@@ -605,19 +581,9 @@ class SmbAssessmentModule : PentestModule {
         subject = host,
         detail = buildString {
             append(challenge.describe())
-            append(" All of this came back from a session setup that presented no credentials. ")
+            append(" Returned to a session setup that presented no credentials.")
             if (challenge.isDomainJoined) {
-                append(
-                    "The DNS domain name is the useful part: it names the directory this machine " +
-                        "trusts, which is where an account attack would be aimed, and confirms " +
-                        "that whatever else is on this segment is reaching a domain controller " +
-                        "from here.",
-                )
-            } else {
-                append(
-                    "The names and OS build narrow down what this device is and which published " +
-                        "vulnerabilities apply to it.",
-                )
+                append(" The DNS domain names the directory this machine trusts.")
             }
         },
         // Blank entries are dropped rather than printed as empty keys: a field the server did

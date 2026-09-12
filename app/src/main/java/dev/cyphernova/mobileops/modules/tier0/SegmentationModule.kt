@@ -100,8 +100,7 @@ class SegmentationModule : PentestModule {
             "${position.interfaceName ?: "unknown interface"}, gateway " +
             "${position.gateway ?: "unknown"}, resolvers " +
             "${position.dnsServers.joinToString().ifBlank { "none" }}. " +
-            "Everything below is measured from here, so this is the baseline the rest of the " +
-            "findings mean something relative to.",
+            "Everything below is measured from here.",
         data = mapOf(
             "cidr" to position.cidr,
             "address" to position.localAddress,
@@ -141,10 +140,9 @@ class SegmentationModule : PentestModule {
                     severity = Severity.INFO,
                     title = "No peers reachable on ${position.cidr}",
                     subject = position.cidr,
-                    detail = "No other client on this segment answered across the first " +
-                        "$PEER_LIMIT addresses. That is consistent with client isolation being " +
-                        "enabled, though it is also consistent with an empty network — it is " +
-                        "evidence rather than proof.",
+                    detail = "No other client answered across the first $PEER_LIMIT " +
+                        "addresses. Consistent with client isolation, and equally with an " +
+                        "empty network.",
                     data = mapOf("peers_probed" to peers.size.toString(), "peers_alive" to "0"),
                 ),
             )
@@ -161,10 +159,7 @@ class SegmentationModule : PentestModule {
                 detail = "${alive.size} other host(s) on this segment answered directly: " +
                     alive.take(REPORT_LIMIT).joinToString() +
                     (if (alive.size > REPORT_LIMIT) " and ${alive.size - REPORT_LIMIT} more" else "") +
-                    ". Every device on this network can reach every other one. On a guest or " +
-                    "visitor segment that means each visitor is exposed to all the others, and " +
-                    "any device that should not have been on this segment is now reachable from " +
-                    "it.",
+                    ". Every device here can reach every other one.",
                 data = mapOf(
                     "peers_alive" to alive.size.toString(),
                     "peers" to alive.take(REPORT_LIMIT).joinToString(),
@@ -195,11 +190,9 @@ class SegmentationModule : PentestModule {
                 title = "Gateway management reachable from this segment",
                 subject = gateway,
                 detail = "The gateway answers on ${open.joinToString { "$it/${MANAGEMENT_PORTS_NAMES[it]}" }}. " +
-                    "A client segment does not need to reach its router's administration at all — " +
-                    "it needs to be routed by it. Where this segment is a guest or visitor " +
-                    "network, anyone on it can attempt the router's credentials, and a default " +
-                    "or reused administrative password there gives up the whole network " +
-                    "including the passphrases of every other SSID it serves.",
+                    "A client segment needs to be routed by its router, not to reach its " +
+                    "administration. Anyone here can attempt its credentials, and that " +
+                    "interface holds the passphrase of every SSID it serves.",
                 data = mapOf("gateway" to gateway, "open_ports" to open.joinToString()),
             ),
         )
@@ -228,10 +221,9 @@ class SegmentationModule : PentestModule {
                     severity = Severity.INFO,
                     title = "Resolver is public",
                     subject = resolver,
-                    detail = "The network handed out ${position.dnsServers.joinToString()}, which " +
-                        "is outside the private ranges. A guest segment pointed at a public " +
-                        "resolver cannot be used to enumerate the internal estate, which is the " +
-                        "correct arrangement.",
+                    detail = "The network handed out ${position.dnsServers.joinToString()}, " +
+                        "outside the private ranges — a public resolver cannot enumerate the " +
+                        "internal estate.",
                     data = mapOf("resolver" to resolver, "posture" to posture.name),
                 ),
             )
@@ -260,10 +252,9 @@ class SegmentationModule : PentestModule {
                     title = "Resolver discloses hosts on other segments",
                     subject = resolver,
                     detail = "Reverse lookups for addresses outside this segment were answered: " +
-                        disclosures.joinToString("; ") + ". The resolver on this segment knows " +
-                        "about address space this segment should have no business with, which " +
-                        "maps the internal estate for anyone who can ask — and it is a strong " +
-                        "hint that the separation is administrative rather than enforced.",
+                        disclosures.joinToString("; ") + ". The resolver knows address space " +
+                        "this segment has no business with, which maps the estate for anyone " +
+                        "who asks.",
                     data = mapOf("resolver" to resolver, "disclosures" to disclosures.joinToString("; ")),
                 ),
             )
@@ -288,11 +279,9 @@ class SegmentationModule : PentestModule {
                         title = "Directory infrastructure named by the resolver",
                         subject = domain,
                         detail = "The resolver answered service records for '$domain': " +
-                            directory.joinToString("; ") + ". These records exist so that domain " +
-                            "members can find their controllers, which means this segment is " +
-                            "being treated as one. A visitor network that can locate the domain " +
-                            "controllers can also reach them, and everything that follows from " +
-                            "that starts here.",
+                            directory.joinToString("; ") + ". These records exist so domain " +
+                            "members can find their controllers, so this segment is being " +
+                            "treated as one.",
                         data = mapOf(
                             "resolver" to resolver,
                             "domain" to domain,
@@ -341,13 +330,10 @@ class SegmentationModule : PentestModule {
                     severity = Severity.INFO,
                     title = "Cross-segment probing is not reliable from here",
                     subject = position.cidr,
-                    detail = "Control address(es) ${answeringControls.joinToString()} answered, " +
-                        "and nothing is assigned to them. Something on the path replies " +
-                        "regardless of what is asked for — a NAT that hairpins, an upstream that " +
-                        "answers for any private address, or a portal intercepting every flow. " +
-                        "Every cross-segment probe would 'succeed' against that, so no " +
-                        "reachability conclusion is drawn here. Testing this properly needs a " +
-                        "host on the other segment to compare against.",
+                    detail = "Control address(es) ${answeringControls.joinToString()} " +
+                        "answered and nothing is assigned to them. Something on the path " +
+                        "replies regardless of what is asked, so every cross-segment probe " +
+                        "would 'succeed' and no conclusion is drawn here.",
                     data = mapOf(
                         "controls_probed" to controls.size.toString(),
                         "controls_answering" to answeringControls.joinToString(),
@@ -377,11 +363,9 @@ class SegmentationModule : PentestModule {
                     severity = Severity.INFO,
                     title = "No other address plan reachable from ${position.cidr}",
                     subject = position.cidr,
-                    detail = "${candidates.size} conventional infrastructure address(es) in other " +
-                        "private ranges were probed and none answered, and the control addresses " +
-                        "confirmed a negative result is possible from here. That is what working " +
-                        "segmentation looks like from this side — though it only covers the " +
-                        "addresses convention puts equipment on, not every possible one.",
+                    detail = "${candidates.size} conventional infrastructure address(es) in " +
+                        "other private ranges answered nothing, and the controls confirm a " +
+                        "negative is possible from here. Conventional addresses only.",
                     data = mapOf("probed" to candidates.size.toString(), "reached" to "0"),
                 ),
             )
@@ -410,13 +394,8 @@ class SegmentationModule : PentestModule {
                         routed.joinToString("; ") { (address, port, _) ->
                             "$address on $port"
                         } +
-                        ". Control addresses in the same private ranges answered nothing, so the " +
-                        "path is not simply replying to everything. Traffic from this segment is " +
-                        "being routed into address space it has no reason to reach, and nothing " +
-                        "dropped it on the way. If this is a guest or visitor network, that is " +
-                        "the finding the engagement is about: everything downstream — equipment " +
-                        "with no authentication of its own, management interfaces, directory " +
-                        "infrastructure — was relying on this separation.",
+                        ". Controls in the same private ranges answered nothing, so these are " +
+                        "real. Traffic is routed into address space it has no reason to reach.",
                     data = mapOf(
                         "source" to position.cidr,
                         "reached" to routed.joinToString { it.first },
@@ -434,13 +413,9 @@ class SegmentationModule : PentestModule {
                     severity = Severity.LOW,
                     title = "The modem's management interface is reachable from this segment",
                     subject = upstream.joinToString { it.first },
-                    detail = "${upstream.joinToString { it.first }} answered. That is the DOCSIS " +
-                        "cable-modem management address, and a router forwards to it by design " +
-                        "so the line can be checked — so this is not the estate's internal " +
-                        "segmentation failing, and it is reported apart from that. It is still " +
-                        "worth a line: the modem has its own credentials and its own firmware, " +
-                        "it is usually the one device nobody patches, and anyone on this segment " +
-                        "can reach its administration.",
+                    detail = "${upstream.joinToString { it.first }} answered — the DOCSIS " +
+                        "cable-modem management address. Not a segmentation failure, but the " +
+                        "modem's own credentials are reachable from here.",
                     data = mapOf(
                         "source" to position.cidr,
                         "reached" to upstream.joinToString { it.first },
@@ -458,13 +433,10 @@ class SegmentationModule : PentestModule {
                     severity = Severity.INFO,
                     title = "${echoes.size} gateway address(es) answered ICMP and nothing else",
                     subject = position.cidr,
-                    detail = "${echoes.joinToString { it.first }} replied to a ping and served " +
+                    detail = "${echoes.joinToString { it.first }} answered ICMP and served " +
                         "nothing on ${CROSS_SEGMENT_PORTS.joinToString()}. A router answers ICMP " +
-                        "for every address it holds, from any interface, so this is as easily " +
-                        "the gateway talking about itself as traffic genuinely reaching those " +
-                        "ranges — and the two are not worth reporting as the same thing. What " +
-                        "would settle it is a reply from a host inside the range that is not the " +
-                        "gateway address.",
+                        "for its own addresses from any interface, so this may be the gateway " +
+                        "talking about itself.",
                     data = mapOf(
                         "source" to position.cidr,
                         "reached" to echoes.joinToString { it.first },
