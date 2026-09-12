@@ -49,7 +49,26 @@ class DefaultCredentialModule : PentestModule {
         hosts.forEach { host ->
             PORTS.forEach { (port, scheme) ->
                 val base = "$scheme://$host:$port"
-                val root = LanHttpClient.probe(base) ?: return@forEach
+                // A host skipped in silence is indistinguishable from a host with nothing
+                // on it. The port was open enough to be worth trying, so why it did not answer
+                // belongs in the log.
+                val rootAttempt = LanHttpClient.attempt(base)
+                val root = (rootAttempt as? LanHttpClient.Attempt.Answered)?.response
+                if (root == null) {
+                    emit(
+                        Finding(
+                            moduleId = id,
+                            observedAtEpochMs = System.currentTimeMillis(),
+                            severity = Severity.INFO,
+                            title = "No HTTP reply from $base",
+                            subject = base,
+                            detail = "Nothing usable came back, so nothing below was tested " +
+                                "against this endpoint: ${rootAttempt.describe()}.",
+                            data = mapOf("attempted" to rootAttempt.describe()),
+                        ),
+                    )
+                    return@forEach
+                }
 
                 if (!root.challengesBasicAuth) {
                     if (HttpAnalysis.looksLikeLoginForm(root)) {

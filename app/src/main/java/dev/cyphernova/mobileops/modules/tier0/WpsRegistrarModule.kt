@@ -108,17 +108,25 @@ class WpsRegistrarModule : PentestModule {
                 return@forEach
             }
 
-            val m1 = fetchM1(service)
+            val deviceInfo = fetchM1(service)
+            val m1 = deviceInfo.message
             if (m1 == null) {
                 emit(
                     note(
                         host,
                         "Registrar did not hand over device info on $host",
                         service.controlUrl,
-                        "${service.serviceType} is advertised at ${service.controlUrl}, but " +
-                            "GetDeviceInfo returned no M1 message. The service is present and " +
-                            "either refusing or not answering, which is the correct behaviour.",
-                        data = mapOf("control_url" to service.controlUrl),
+                        "${service.serviceType} is advertised at ${service.controlUrl}, and " +
+                            "GetDeviceInfo did not produce an M1 message: " +
+                            "${deviceInfo.failure ?: "no reason recorded"}. A SOAP fault is the " +
+                            "registrar declining, which is the configuration holding; a refused " +
+                            "connection or a timeout is the daemon not serving the control URL " +
+                            "it advertised, which is a different thing and not a security " +
+                            "control.",
+                        data = mapOf(
+                            "control_url" to service.controlUrl,
+                            "stopped_at" to deviceInfo.failure.orEmpty(),
+                        ).filterValues { it.isNotBlank() },
                     ),
                 )
                 return@forEach
@@ -145,15 +153,25 @@ class WpsRegistrarModule : PentestModule {
         }
     }
 
-    private suspend fun fetchM1(service: UpnpWps.ServiceEndpoint): ByteArray? {
-        val response = LanHttpClient.probe(
+    private suspend fun fetchM1(service: UpnpWps.ServiceEndpoint): SoapResult {
+        val attempt = LanHttpClient.attempt(
             url = service.controlUrl,
             method = "POST",
             body = UpnpWps.getDeviceInfoEnvelope(service.serviceType),
             headers = soapHeaders(service, UpnpWps.ACTION_GET_DEVICE_INFO),
             timeoutMs = REQUEST_TIMEOUT_MS,
-        ) ?: return null
+        )
+        val response = (attempt as? LanHttpClient.Attempt.Answered)?.response
+            ?: return SoapResult(failure = attempt.describe())
+        if (UpnpWps.isSoapFault(response.body)) {
+            return SoapResult(failure = "GetDeviceInfo returned a SOAP fault (HTTP ${response.status})")
+        }
         return UpnpWps.extractDeviceInfo(response.body)
+            ?.let { SoapResult(message = it) }
+            ?: SoapResult(
+                failure = "GetDeviceInfo answered HTTP ${response.status} with " +
+                    "${response.body.length} bytes that carried no M1 message",
+            )
     }
 
     private fun reachableFinding(
@@ -212,16 +230,12 @@ class WpsRegistrarModule : PentestModule {
         service: UpnpWps.ServiceEndpoint,
         emit: suspend (Finding) -> Unit,
     ): Boolean {
-        val response = LanHttpClient.probe(
-            url = service.controlUrl,
-            method = "POST",
-            body = UpnpWps.getApSettingsEnvelope(service.serviceType),
-            headers = soapHeaders(service, UpnpWps.ACTION_GET_AP_SETTINGS),
-            timeoutMs = REQUEST_TIMEOUT_MS,
-        ) ?: return false
-
-        if (UpnpWps.isSoapFault(response.body)) return false
-        val settings = UpnpWps.extractMessage(response.body, "NewAPSettings") ?: return false
+        val settings = soapCall(
+            service,
+            UpnpWps.ACTION_GET_AP_SETTINGS,
+            UpnpWps.getApSettingsEnvelope(service.serviceType),
+            "NewAPSettings",
+        ).message ?: return false
         val attributes = Wsc.parse(settings)
         val key = Wsc
             .first(attributes, Wsc.Attr.NETWORK_KEY)
@@ -369,7 +383,7 @@ class WpsRegistrarModule : PentestModule {
         service: UpnpWps.ServiceEndpoint,
         pin: String,
     ): WpsRegistrarExchange.Attempt? {
-        val fresh = fetchM1(service) ?: return null
+        val fresh = fetchM1(service).message ?: return null
         return WpsRegistrarExchange(fresh) { message -> putMessage(service, message) }.attempt(pin)
     }
 
@@ -490,19 +504,59 @@ class WpsRegistrarModule : PentestModule {
         data = data + ("host" to host),
     )
 
+    /**
+     * One SOAP call, with the reason it failed kept rather than discarded.
+     *
+     * Everything past the description fetch in this module is code that has never run against a
+     * device — the cleartext block stopped it before it started. When it finally does run, a
+     * refused connection, a timeout, a SOAP fault and a reply missing the element all have to be
+     * distinguishable, or diagnosing it costs a round trip through the operator each time.
+     */
+    private suspend fun soapCall(
+        service: UpnpWps.ServiceEndpoint,
+        action: String,
+        envelope: ByteArray,
+        element: String,
+    ): SoapResult {
+        val attempt = LanHttpClient.attempt(
+            url = service.controlUrl,
+            method = "POST",
+            body = envelope,
+            headers = soapHeaders(service, action),
+            timeoutMs = REQUEST_TIMEOUT_MS,
+        )
+        val response = (attempt as? LanHttpClient.Attempt.Answered)?.response
+            ?: return SoapResult(failure = attempt.describe())
+
+        if (UpnpWps.isSoapFault(response.body)) {
+            return SoapResult(
+                failure = "$action returned a SOAP fault (HTTP ${response.status}), which is the " +
+                    "registrar declining rather than failing",
+            )
+        }
+        val message = UpnpWps.extractMessage(response.body, element)
+            ?: return SoapResult(
+                failure = "$action answered HTTP ${response.status} with " +
+                    "${response.body.length} bytes but no $element element",
+            )
+        return SoapResult(message = message)
+    }
+
+    /** A SOAP reply, or why there was not one. */
+    private data class SoapResult(
+        val message: ByteArray? = null,
+        val failure: String? = null,
+    )
+
     private suspend fun putMessage(
         service: UpnpWps.ServiceEndpoint,
         message: ByteArray,
-    ): ByteArray? {
-        val response = LanHttpClient.probe(
-            url = service.controlUrl,
-            method = "POST",
-            body = UpnpWps.putMessageEnvelope(service.serviceType, message),
-            headers = soapHeaders(service, UpnpWps.ACTION_PUT_MESSAGE),
-            timeoutMs = REQUEST_TIMEOUT_MS,
-        ) ?: return null
-        return UpnpWps.extractMessage(response.body, "NewOutMessage")
-    }
+    ): ByteArray? = soapCall(
+        service,
+        UpnpWps.ACTION_PUT_MESSAGE,
+        UpnpWps.putMessageEnvelope(service.serviceType, message),
+        "NewOutMessage",
+    ).message
 
     private fun soapHeaders(service: UpnpWps.ServiceEndpoint, action: String) = mapOf(
         "Content-Type" to "text/xml; charset=\"utf-8\"",
