@@ -4,6 +4,7 @@ import dev.cyphernova.mobileops.core.capability.Tier
 import dev.cyphernova.mobileops.core.discovery.Mdns
 import dev.cyphernova.mobileops.core.evidence.Finding
 import dev.cyphernova.mobileops.core.evidence.Severity
+import dev.cyphernova.mobileops.core.segment.ReachedAddress
 import dev.cyphernova.mobileops.core.module.Intrusiveness
 import dev.cyphernova.mobileops.core.module.ModuleCategory
 import dev.cyphernova.mobileops.core.module.ModuleContext
@@ -387,35 +388,92 @@ class SegmentationModule : PentestModule {
             return 0
         }
 
-        emit(
-            Finding(
-                moduleId = id,
-                observedAtEpochMs = System.currentTimeMillis(),
-                severity = Severity.CRITICAL,
-                title = "This segment routes into ${reached.size} other address plan(s)",
-                subject = position.cidr,
-                detail = "Reached from ${position.cidr}: " +
-                    reached.joinToString("; ") { (candidate, port) ->
-                        "${candidate.address}${port?.let { " on $it" } ?: " (responds to probe)"}"
-                    } +
-                    ". Control addresses in the same private ranges answered nothing, so the " +
-                    "path is not simply replying to everything — these are real. Traffic from " +
-                    "this segment is being routed into address space it has no reason to reach, " +
-                    "and nothing dropped it on the way. If this is a guest or visitor network, " +
-                    "that is the finding the engagement is about: everything downstream — " +
-                    "equipment with no authentication of its own, management interfaces, " +
-                    "directory infrastructure — was relying on this separation.\n\n" +
-                    "Worth confirming what each one actually is before writing it up. A device " +
-                    "at 192.168.100.1 is very often the cable modem behind the router rather " +
-                    "than another segment of the same estate, which is a different finding with " +
-                    "a different owner.",
-                data = mapOf(
-                    "source" to position.cidr,
-                    "reached" to reached.joinToString { it.first.address },
-                    "count" to reached.size.toString(),
+        // Counted by what each address actually is. A modem answering its own management
+        // address and a router echoing ICMP for its own interface are not the estate's
+        // segmentation failing, and folding them into one number overstates the finding.
+        val classified = reached.map { (candidate, port) ->
+            Triple(candidate.address, port, ReachedAddress.classify(candidate.address, port))
+        }
+        val routed = classified.filter { it.third == ReachedAddress.Kind.ROUTED_SERVICE }
+        val upstream = classified.filter { it.third == ReachedAddress.Kind.UPSTREAM_EQUIPMENT }
+        val echoes = classified.filter { it.third == ReachedAddress.Kind.GATEWAY_ECHO }
+
+        if (routed.isNotEmpty()) {
+            emit(
+                Finding(
+                    moduleId = id,
+                    observedAtEpochMs = System.currentTimeMillis(),
+                    severity = Severity.CRITICAL,
+                    title = "This segment routes into ${routed.size} other address plan(s)",
+                    subject = position.cidr,
+                    detail = "Reached from ${position.cidr}, with a service answering: " +
+                        routed.joinToString("; ") { (address, port, _) ->
+                            "$address on $port"
+                        } +
+                        ". Control addresses in the same private ranges answered nothing, so the " +
+                        "path is not simply replying to everything. Traffic from this segment is " +
+                        "being routed into address space it has no reason to reach, and nothing " +
+                        "dropped it on the way. If this is a guest or visitor network, that is " +
+                        "the finding the engagement is about: everything downstream — equipment " +
+                        "with no authentication of its own, management interfaces, directory " +
+                        "infrastructure — was relying on this separation.",
+                    data = mapOf(
+                        "source" to position.cidr,
+                        "reached" to routed.joinToString { it.first },
+                        "count" to routed.size.toString(),
+                    ),
                 ),
-            ),
-        )
+            )
+        }
+
+        if (upstream.isNotEmpty()) {
+            emit(
+                Finding(
+                    moduleId = id,
+                    observedAtEpochMs = System.currentTimeMillis(),
+                    severity = Severity.LOW,
+                    title = "The modem's management interface is reachable from this segment",
+                    subject = upstream.joinToString { it.first },
+                    detail = "${upstream.joinToString { it.first }} answered. That is the DOCSIS " +
+                        "cable-modem management address, and a router forwards to it by design " +
+                        "so the line can be checked — so this is not the estate's internal " +
+                        "segmentation failing, and it is reported apart from that. It is still " +
+                        "worth a line: the modem has its own credentials and its own firmware, " +
+                        "it is usually the one device nobody patches, and anyone on this segment " +
+                        "can reach its administration.",
+                    data = mapOf(
+                        "source" to position.cidr,
+                        "reached" to upstream.joinToString { it.first },
+                        "kind" to "upstream equipment",
+                    ),
+                ),
+            )
+        }
+
+        if (echoes.isNotEmpty()) {
+            emit(
+                Finding(
+                    moduleId = id,
+                    observedAtEpochMs = System.currentTimeMillis(),
+                    severity = Severity.INFO,
+                    title = "${echoes.size} gateway address(es) answered ICMP and nothing else",
+                    subject = position.cidr,
+                    detail = "${echoes.joinToString { it.first }} replied to a ping and served " +
+                        "nothing on ${CROSS_SEGMENT_PORTS.joinToString()}. A router answers ICMP " +
+                        "for every address it holds, from any interface, so this is as easily " +
+                        "the gateway talking about itself as traffic genuinely reaching those " +
+                        "ranges — and the two are not worth reporting as the same thing. What " +
+                        "would settle it is a reply from a host inside the range that is not the " +
+                        "gateway address.",
+                    data = mapOf(
+                        "source" to position.cidr,
+                        "reached" to echoes.joinToString { it.first },
+                        "kind" to "gateway echo",
+                    ),
+                ),
+            )
+        }
+
         return reached.size
     }
 

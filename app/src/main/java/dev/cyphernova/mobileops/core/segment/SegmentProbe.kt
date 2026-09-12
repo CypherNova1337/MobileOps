@@ -202,3 +202,56 @@ object SegmentProbe {
 
     private val COMMON_172_SEGMENTS = listOf("172.16.0.1", "172.16.1.1", "172.20.0.1", "172.31.0.1")
 }
+
+/**
+ * What an address outside the local segment actually is.
+ *
+ * Counting every reachable address as another segment of the estate overstates the finding twice
+ * over, and a live run showed both ways:
+ *
+ *  - `192.168.100.1` answered, and it is the cable modem. That address is the DOCSIS management
+ *    default — Arris, Motorola, Netgear and Technicolor all use it — and a router forwards to it
+ *    by design so its owner can see the line. Reachable modem management is worth reporting; it
+ *    is not the estate's internal segmentation failing.
+ *  - `192.168.10.1` and `192.168.20.1` answered ICMP and served nothing. A router replies to ICMP
+ *    for *every* address it holds, from any interface, so a ping answered by a `.1` is as easily
+ *    the gateway talking about itself as proof that traffic reaches that segment at all.
+ *
+ * A finding that cannot tell those apart from a genuinely routed path is not evidence, so the
+ * three are kept apart and only the last one carries the weight.
+ */
+object ReachedAddress {
+
+    enum class Kind {
+        /** The cable modem's management address, reachable by design. */
+        UPSTREAM_EQUIPMENT,
+
+        /** A TCP service answered, so something really is reachable over there. */
+        ROUTED_SERVICE,
+
+        /** Only ICMP answered, on an address a router would hold itself. */
+        GATEWAY_ECHO,
+    }
+
+    /** The DOCSIS cable-modem management address, the same on every vendor's hardware. */
+    const val CABLE_MODEM = "192.168.100.1"
+
+    fun classify(address: String, answeringPort: Int?): Kind = when {
+        address == CABLE_MODEM -> Kind.UPSTREAM_EQUIPMENT
+        answeringPort != null -> Kind.ROUTED_SERVICE
+        // A router answers for its own interfaces. Only a `.1` is ambiguous in that way; an
+        // arbitrary host inside the range answering ICMP really is that range being reached.
+        address.endsWith(".1") -> Kind.GATEWAY_ECHO
+        else -> Kind.ROUTED_SERVICE
+    }
+
+    fun explain(kind: Kind): String = when (kind) {
+        Kind.UPSTREAM_EQUIPMENT ->
+            "the cable modem's management address, which a router forwards to by design"
+        Kind.ROUTED_SERVICE ->
+            "a service answered, so traffic from this segment genuinely reaches it"
+        Kind.GATEWAY_ECHO ->
+            "only ICMP answered on a gateway address, which the router may be answering for " +
+                "its own interface rather than routing anywhere"
+    }
+}
