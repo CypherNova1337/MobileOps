@@ -52,12 +52,17 @@ class EvidenceStore(private val directory: File) {
     }
 
     /**
-     * Renders the log as a Markdown report ready to drop into a write-up.
+     * Renders the log as a Markdown report.
      *
-     * Device verdicts are recomputed here rather than taken as filed. A module can only classify
-     * from what the log held when it ran, and the evidence that settles what a device is often
-     * arrives from another module seconds later; the report is written once everything has run,
-     * so it is the right place to decide.
+     * Two things are decided here rather than by the modules. Device verdicts are recomputed
+     * against the complete log, because the evidence that settles what a device is often arrives
+     * from another module seconds after the one that classified it. And the arrangement is
+     * decided here, because only the finished log knows what is worth reading first — a run that
+     * produced 177 findings, 144 of them observations, buried the three that mattered.
+     *
+     * Nothing is dropped. Urgent findings lead, real findings follow in full, and the record of
+     * what is on the network and what failed to answer waits at the back in a form that can be
+     * skimmed.
      */
     fun renderReport(findings: List<Finding> = _findings.value): String =
         buildString {
@@ -67,64 +72,137 @@ class EvidenceStore(private val directory: File) {
             appendLine("Generated ${formatTime(System.currentTimeMillis())}")
             appendLine()
 
-            val bySeverity = findings.groupingBy { it.severity }.eachCount()
-            if (bySeverity.isNotEmpty()) {
-                appendLine("| Severity | Count |")
-                appendLine("| --- | --- |")
-                Severity.entries.sortedByDescending { it.rank }.forEach { severity ->
-                    bySeverity[severity]?.let { appendLine("| ${severity.label} | $it |") }
-                }
-                appendLine()
-            }
-
-            val distinct = findings
-                .groupBy { listOf(it.moduleId, it.title, it.subject, it.detail) }
-                .size
-            appendLine(
-                if (distinct == findings.size) {
-                    "## Findings ($distinct)"
-                } else {
-                    "## Findings ($distinct distinct, ${findings.size} observations)"
-                },
-            )
-            appendLine()
             if (findings.isEmpty()) {
                 appendLine("No findings recorded.")
                 return@buildString
             }
-            // Re-running a module re-files everything it sees, so a second pass doubles the
-            // report. Identical observations are collapsed into one entry with a count; the log
-            // itself stays append-only and complete.
-            // Keyed on the detail too. Without it, findings that share a title and subject but
-            // say different things are merged and all but one is dropped from the report.
-            findings.groupBy { listOf(it.moduleId, it.title, it.subject, it.detail) }
-                .values
-                .map { group -> group.maxBy { it.observedAtEpochMs } to group }
-                .sortedWith(
-                    compareByDescending<Pair<Finding, List<Finding>>> { it.first.severity.rank }
-                        .thenBy { it.first.observedAtEpochMs },
+
+            val collapsed = ReportLayout.collapse(findings)
+            val sections = collapsed.groupBy { ReportLayout.sectionFor(it.finding) }
+            val actOn = sections[ReportLayout.Section.ACT_ON].orEmpty()
+            val other = sections[ReportLayout.Section.FINDING].orEmpty()
+            val observations = sections[ReportLayout.Section.OBSERVATION].orEmpty()
+            val diagnostics = sections[ReportLayout.Section.DIAGNOSTIC].orEmpty()
+
+            // ---- What to do about it ------------------------------------------------------
+            appendLine("## Act on these")
+            appendLine()
+            if (actOn.isEmpty()) {
+                appendLine(
+                    "Nothing critical or high. That is the absence of evidence, not evidence of " +
+                        "absence: see what did not answer, at the end.",
                 )
-                .forEach { (finding, group) ->
-                appendLine("### [${finding.severity.label}] ${finding.title}")
+            } else {
+                actOn.forEachIndexed { index, occurrence ->
+                    val finding = occurrence.finding
+                    appendLine("${index + 1}. **${finding.title}** — ${finding.severity.label}")
+                    appendLine("   ${ReportLayout.headline(finding)}")
+                }
+            }
+            appendLine()
+
+            appendLine(
+                "${actOn.size} to act on · ${other.size} further finding(s) · " +
+                    "${observations.size} observation(s) · ${diagnostics.size} unanswered",
+            )
+            appendLine()
+
+            // ---- What is on the network ---------------------------------------------------
+            val hosts = ReportLayout.hosts(findings)
+            if (hosts.isNotEmpty()) {
+                appendLine("## Hosts")
                 appendLine()
-                appendLine("- **Subject:** ${finding.subject}")
-                appendLine("- **Module:** `${finding.moduleId}`")
-                appendLine("- **Observed:** ${formatTime(finding.observedAtEpochMs)}")
-                if (group.size > 1) {
+                appendLine("| Address | What it is | Open ports | Findings |")
+                appendLine("| --- | --- | --- | --- |")
+                hosts.forEach { host ->
                     appendLine(
-                        "- **Seen:** ${group.size} times, first at " +
-                            formatTime(group.minOf { it.observedAtEpochMs }),
+                        "| ${host.address} | ${host.description} | " +
+                            "${host.openPorts.ifBlank { "—" }} | ${host.findingCount} |",
                     )
                 }
                 appendLine()
-                appendLine(finding.detail)
-                if (finding.data.isNotEmpty()) {
-                    appendLine()
-                    finding.data.forEach { (key, value) -> appendLine("  - `$key`: $value") }
-                }
+            }
+
+            // ---- The findings, in full ----------------------------------------------------
+            if (actOn.isNotEmpty() || other.isNotEmpty()) {
+                appendLine("## Findings")
                 appendLine()
+                (actOn + other)
+                    .groupBy { it.finding.severity }
+                    .toSortedMap(compareByDescending { it.rank })
+                    .forEach { (severity, group) ->
+                        appendLine("### ${severity.label} (${group.size})")
+                        appendLine()
+                        group.forEach { appendDetail(it) }
+                    }
+            }
+
+            // ---- The record ----------------------------------------------------------------
+            if (observations.isNotEmpty()) {
+                appendLine("## Observations (${observations.size})")
+                appendLine()
+                appendLine("What is on the network. No action implied.")
+                appendLine()
+                observations
+                    .sortedBy { it.finding.moduleId }
+                    .groupBy { it.finding.moduleId }
+                    .forEach { (moduleId, group) ->
+                        appendLine("**`$moduleId`**")
+                        appendLine()
+                        group.forEach { appendCompact(it) }
+                        appendLine()
+                    }
+            }
+
+            if (diagnostics.isNotEmpty()) {
+                appendLine("## Did not answer (${diagnostics.size})")
+                appendLine()
+                appendLine(
+                    "Asked and got nothing usable. Kept because a failure with no reason " +
+                        "recorded is indistinguishable from a module that never ran.",
+                )
+                appendLine()
+                diagnostics
+                    .sortedBy { it.finding.moduleId }
+                    .groupBy { it.finding.moduleId }
+                    .forEach { (moduleId, group) ->
+                        appendLine("**`$moduleId`**")
+                        appendLine()
+                        group.forEach { appendCompact(it) }
+                        appendLine()
+                    }
             }
         }
+
+    /** A finding in full: everything it says, plus the evidence behind it. */
+    private fun StringBuilder.appendDetail(occurrence: ReportLayout.Occurrence) {
+        val finding = occurrence.finding
+        appendLine("#### ${finding.title}")
+        appendLine()
+        appendLine("`${finding.moduleId}` · ${finding.subject} · ${formatTime(finding.observedAtEpochMs)}")
+        if (occurrence.times > 1) {
+            appendLine()
+            appendLine("Seen ${occurrence.times} times, first at ${formatTime(occurrence.firstSeenEpochMs)}.")
+        }
+        appendLine()
+        appendLine(finding.detail)
+        if (finding.data.isNotEmpty()) {
+            appendLine()
+            finding.data.forEach { (key, value) -> appendLine("  - `$key`: $value") }
+        }
+        appendLine()
+    }
+
+    /** One line. The detail is in the log; this is the index to it. */
+    private fun StringBuilder.appendCompact(occurrence: ReportLayout.Occurrence) {
+        val finding = occurrence.finding
+        // The subject is only worth repeating when the title has not already named it.
+        val subject = finding.subject
+            .takeIf { it.isNotBlank() && !finding.title.contains(it) }
+            ?.let { " — $it" }
+            .orEmpty()
+        appendLine("- ${finding.title}$subject")
+    }
 
     private fun formatTime(epochMs: Long): String = ISO.format(Date(epochMs))
 
